@@ -1,0 +1,55 @@
+version: '1'
+
+services:
+  api:
+    name: puzzle-roll-api
+    type: docker
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    port: 3000
+    healthCheck:
+      path: /api/health
+      interval: 30
+      timeout: 10
+      retries: 3
+    environment:
+      - DATABASE_URL
+      - REDIS_URL
+      - JWT_SECRET
+      - JWT_REFRESH_SECRET
+      - JWT_EXPIRES_IN
+      - JWT_REFRESH_EXPIRES_IN
+      - PORT
+      - NODE_ENV
+      - ADMIN_API_KEY
+      - EXPO_ACCESS_TOKEN
+    domains:
+      - host: api.puzzleroll.com
+        port: 3000
+        https: true
+    resources:
+      memory: 512m
+      cpu: 0.5
+    restart: unless-stopped
+    dependsOn:
+      - postgres
+      - redis
+
+  postgres:
+    name: puzzle-roll-postgres
+    type: postgres
+    image: postgres:16-alpine
+    port: 5432
+    volume: puzzle-roll-postgres-data
+    environment:
+      POSTGRES_DB: puzzleroll
+      POSTGRES_USER: puzzleroll
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  redis:
+    name: puzzle-roll-redis
+    type: redis
+    image: redis:7-alpine
+    port: 6379
+    volume: puzzle-roll-redis-data

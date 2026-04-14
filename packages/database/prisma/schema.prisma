@@ -1,0 +1,168 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum GameType {
+  sudoku
+  queens
+  zip
+  tango
+  nonogram
+  minesweeper
+  kakuro
+  light_up
+  futoshiki
+  hitori
+}
+
+enum Difficulty {
+  easy
+  medium
+  hard
+  expert
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  passwordHash String?
+  isAnonymous  Boolean  @default(true)
+  deviceId     String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  settings    UserSettings?
+  stats       UserStats[]
+  completions GameCompletion[]
+  pushTokens  PushToken[]
+
+  @@index([email])
+  @@index([deviceId])
+}
+
+// ─── User Settings ────────────────────────────────────────────────────────────
+
+model UserSettings {
+  id                     String  @id @default(cuid())
+  userId                 String  @unique
+  notificationEnabled    Boolean @default(false)
+  notificationHour       Int     @default(8)  // 0–23
+  timezoneOffsetMinutes  Int     @default(0)
+  soundEnabled           Boolean @default(true)
+  hapticsEnabled         Boolean @default(true)
+  autoRemoveNotes        Boolean @default(true)  // Sudoku-specific but stored globally
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── Push Token ───────────────────────────────────────────────────────────────
+
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  platform  String   // 'ios' | 'android'
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── User Stats ───────────────────────────────────────────────────────────────
+
+model UserStats {
+  id              String   @id @default(cuid())
+  userId          String
+  gameType        GameType
+  gamesPlayed     Int      @default(0)
+  gamesCompleted  Int      @default(0)
+  bestTime        Int?     // seconds
+  currentStreak   Int      @default(0)
+  longestStreak   Int      @default(0)
+  lastPlayedDate  String?  // ISO date YYYY-MM-DD
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, gameType])
+  @@index([userId])
+  @@index([gameType])
+}
+
+// ─── Puzzle ───────────────────────────────────────────────────────────────────
+
+model GamePuzzle {
+  id          String     @id @default(cuid())
+  gameType    GameType
+  difficulty  Difficulty
+  puzzleData  Json       // game-specific puzzle data
+  solution    Json       // game-specific solution
+  seed        Int        // RNG seed used to generate
+  createdAt   DateTime   @default(now())
+
+  dailyPuzzles DailyPuzzle[]
+  completions  GameCompletion[]
+
+  @@index([gameType, difficulty])
+  @@index([gameType])
+}
+
+// ─── Daily Puzzle ─────────────────────────────────────────────────────────────
+
+model DailyPuzzle {
+  id        String     @id @default(cuid())
+  gameType  GameType
+  date      String     // ISO date YYYY-MM-DD
+  puzzleId  String
+  createdAt DateTime   @default(now())
+
+  puzzle      GamePuzzle     @relation(fields: [puzzleId], references: [id])
+  completions GameCompletion[]
+
+  @@unique([gameType, date])
+  @@index([gameType, date])
+  @@index([date])
+}
+
+// ─── Game Completion ──────────────────────────────────────────────────────────
+
+model GameCompletion {
+  id              String     @id @default(cuid())
+  userId          String
+  puzzleId        String
+  dailyPuzzleId   String?
+  gameType        GameType
+  difficulty      Difficulty
+  isDaily         Boolean    @default(false)
+  elapsedSeconds  Int
+  hintsUsed       Int        @default(0)
+  completedAt     DateTime   @default(now())
+  shareableResult String?    // Wordle-style emoji string
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  puzzle       GamePuzzle   @relation(fields: [puzzleId], references: [id])
+  dailyPuzzle  DailyPuzzle? @relation(fields: [dailyPuzzleId], references: [id])
+
+  @@unique([userId, puzzleId])
+  @@index([userId])
+  @@index([puzzleId])
+  @@index([dailyPuzzleId])
+  @@index([gameType, completedAt])
+  @@index([isDaily, gameType, completedAt])
+}
