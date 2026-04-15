@@ -9,10 +9,10 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "type-check": "turbo run type-check",
-    "db:generate": "pnpm --filter @puzzle-roll/database prisma generate",
-    "db:migrate": "pnpm --filter @puzzle-roll/database prisma migrate dev",
-    "db:seed": "pnpm --filter @puzzle-roll/database prisma db seed",
-    "db:studio": "pnpm --filter @puzzle-roll/database prisma studio"
+    "db:generate": "pnpm --filter @puzzle-roll/database db:generate",
+    "db:migrate": "pnpm --filter @puzzle-roll/database db:migrate",
+    "db:seed": "pnpm --filter @puzzle-roll/database db:seed",
+    "db:studio": "pnpm --filter @puzzle-roll/database db:studio"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

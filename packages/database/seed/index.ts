@@ -1,4 +1,5 @@
-import { PrismaClient, GameType, Difficulty } from '@prisma/client';
+import { PrismaClient, GameType, Difficulty } from '../prisma/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { SudokuEngine } from '@puzzle-roll/shared';
 import { generatePuzzle as generateQueens } from '../../../packages/shared/src/engines/queens';
 import { generatePuzzle as generateZip } from '../../../packages/shared/src/engines/zip';
@@ -9,8 +10,13 @@ import { generatePuzzle as generateKakuro } from '../../../packages/shared/src/e
 import { generatePuzzle as generateLightUp } from '../../../packages/shared/src/engines/lightup';
 import { generatePuzzle as generateFutoshiki } from '../../../packages/shared/src/engines/futoshiki';
 import { generatePuzzle as generateHitori } from '../../../packages/shared/src/engines/hitori';
+import { SqlDriverAdapterFactory } from '@prisma/client/runtime/client';
 
-const prisma = new PrismaClient();
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) throw new Error('DATABASE_URL is not set. Check your .env file.');
+
+const adapter: SqlDriverAdapterFactory = new PrismaPg({ connectionString });
+const prisma = new PrismaClient({ adapter });
 
 const PUZZLES_PER_DIFFICULTY = 20;
 const DAILY_DAYS = 365;

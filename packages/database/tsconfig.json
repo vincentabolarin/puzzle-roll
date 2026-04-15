@@ -6,7 +6,8 @@
     "moduleResolution": "node",
     "outDir": "./dist",
     "rootDir": ".",
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "types": ["node"],
   },
   "include": ["src/**/*", "seed/**/*"],
   "exclude": ["node_modules", "dist"]
