@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/zip';
+export { generateZip } from '@puzzle-roll/shared';

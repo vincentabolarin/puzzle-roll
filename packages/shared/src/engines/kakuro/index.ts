@@ -6,13 +6,13 @@ export type KakuroDigit = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export interface KakuroBlackCell {
   type: 'black';
-  acrossClue: number | null; // sum for run to the right
-  downClue: number | null;   // sum for run below
+  acrossClue: number | null;
+  downClue: number | null;
 }
 
 export interface KakuroWhiteCell {
   type: 'white';
-  value: KakuroDigit | 0; // 0 = empty (given or player-filled)
+  value: KakuroDigit | 0;
   isGiven: boolean;
 }
 
@@ -42,27 +42,6 @@ export const KAKURO_SIZE_CONFIG: Record<Difficulty, number> = {
   [Difficulty.EXPERT]: 15,
 };
 
-// ─── Precomputed: all valid combinations for a run of length L summing to S ──
-
-function getCombinations(sum: number, length: number): KakuroDigit[][] {
-  const results: KakuroDigit[][] = [];
-  function backtrack(remaining: number, start: KakuroDigit, current: KakuroDigit[]): void {
-    if (current.length === length) {
-      if (remaining === 0) results.push([...current]);
-      return;
-    }
-    for (let d = start; d <= 9; d++) {
-      if (d <= remaining) {
-        current.push(d as KakuroDigit);
-        backtrack(remaining - d, (d + 1) as KakuroDigit, current);
-        current.pop();
-      }
-    }
-  }
-  backtrack(sum, 1, []);
-  return results;
-}
-
 // ─── Seeded RNG ───────────────────────────────────────────────────────────────
 
 function createRng(seed: number): () => number {
@@ -77,37 +56,60 @@ function createRng(seed: number): () => number {
 }
 
 function shuffle<T>(arr: T[], rng: () => number): T[] {
-  for (let i = arr.length - 1; i > 0; i--) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+    [a[i], a[j]] = [a[j], a[i]];
   }
-  return arr;
+  return a;
 }
 
-// ─── Build a simple Kakuro grid layout ───────────────────────────────────────
+// ─── Build a Kakuro grid layout ───────────────────────────────────────────────
+// Row 0 and col 0 are always black (clue header row/col).
+// Interior black cells split runs. Every white cell must belong to
+// an across run (length ≥ 2) AND a down run (length ≥ 2).
 
 function buildLayout(size: number, rng: () => number): boolean[][] {
-  // true = white cell, false = black cell
-  // Row 0 and col 0 are always black (clue row/col)
+  // true = white, false = black
   const white: boolean[][] = Array.from({ length: size }, (_, r) =>
     Array.from({ length: size }, (_, c) => r > 0 && c > 0)
   );
 
-  // Randomly black out some interior cells to create runs
-  const blackRate = 0.2;
+  // Scatter interior black cells (~18% of interior)
   for (let r = 1; r < size; r++) {
     for (let c = 1; c < size; c++) {
-      if (rng() < blackRate) white[r][c] = false;
+      if (rng() < 0.18) white[r][c] = false;
     }
   }
 
-  // Ensure no white cell is isolated (has at least one white neighbour in its run)
-  for (let r = 1; r < size; r++) {
-    for (let c = 1; c < size; c++) {
-      if (white[r][c]) {
-        const acrossLen = getRunLength(white, r, c, 0, 1, size);
-        const downLen = getRunLength(white, r, c, 1, 0, size);
-        if (acrossLen < 2 && downLen < 2) white[r][c] = false;
+  // Fix: ensure every white cell has an across run of length ≥ 2
+  // and a down run of length ≥ 2. Eliminate isolated cells.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let r = 1; r < size; r++) {
+      for (let c = 1; c < size; c++) {
+        if (!white[r][c]) continue;
+
+        // Count across run length (including this cell)
+        let acrossLen = 0;
+        for (let cc = c; cc < size && white[r][cc]; cc++) acrossLen++;
+        let acrossLeft = 0;
+        for (let cc = c - 1; cc >= 1 && white[r][cc]; cc--) acrossLeft++;
+
+        // Count down run length (including this cell)
+        let downLen = 0;
+        for (let rr = r; rr < size && white[rr][c]; rr++) downLen++;
+        let downUp = 0;
+        for (let rr = r - 1; rr >= 1 && white[rr][c]; rr--) downUp++;
+
+        const totalAcross = acrossLeft + acrossLen;
+        const totalDown = downUp + downLen;
+
+        if (totalAcross < 2 || totalDown < 2) {
+          white[r][c] = false;
+          changed = true;
+        }
       }
     }
   }
@@ -115,198 +117,201 @@ function buildLayout(size: number, rng: () => number): boolean[][] {
   return white;
 }
 
-function getRunLength(white: boolean[][], r: number, c: number, dr: number, dc: number, size: number): number {
-  // Count cells in this direction including current
-  let count = 1;
-  let nr = r + dr, nc = c + dc;
-  while (nr < size && nc < size && white[nr][nc]) { count++; nr += dr; nc += dc; }
-  // Also count backwards
-  nr = r - dr; nc = c - dc;
-  while (nr >= 0 && nc >= 0 && nr < size && nc < size && white[nr][nc]) { count++; nr -= dr; nc -= dc; }
-  return count;
+// ─── Fill grid with valid digits using backtracking ───────────────────────────
+
+interface Run {
+  cells: Array<[number, number]>;
 }
 
-// ─── Solve Kakuro with backtracking ─────────────────────────────────────────
+function buildRuns(white: boolean[][], size: number): { across: Run[][]; down: Run[][] } {
+  // across[r][c] = the Run containing cell (r,c) in across direction, or null
+  const acrossRun: (Run | null)[][] = Array.from({ length: size }, () =>
+    Array(size).fill(null)
+  );
+  const downRun: (Run | null)[][] = Array.from({ length: size }, () =>
+    Array(size).fill(null)
+  );
 
-function solveKakuro(
-  grid: KakuroCell[][],
+  // Build across runs
+  for (let r = 1; r < size; r++) {
+    let c = 1;
+    while (c < size) {
+      if (!white[r][c]) { c++; continue; }
+      const run: Run = { cells: [] };
+      while (c < size && white[r][c]) {
+        run.cells.push([r, c]);
+        acrossRun[r][c] = run;
+        c++;
+      }
+    }
+  }
+
+  // Build down runs
+  for (let c = 1; c < size; c++) {
+    let r = 1;
+    while (r < size) {
+      if (!white[r][c]) { r++; continue; }
+      const run: Run = { cells: [] };
+      while (r < size && white[r][c]) {
+        run.cells.push([r, c]);
+        downRun[r][c] = run;
+        r++;
+      }
+    }
+  }
+
+  return { across: acrossRun as Run[][], down: downRun as Run[][] };
+}
+
+function fillGrid(
+  white: boolean[][],
   size: number,
-  limit: number
-): Array<Array<{ row: number; col: number; value: KakuroDigit }>> {
-  // Collect all white cells in order
-  const whiteCells: Array<{ row: number; col: number }> = [];
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      if (grid[r][c].type === 'white') whiteCells.push({ row: r, col: c });
+  rng: () => number
+): number[][] | null {
+  const grid: number[][] = Array.from({ length: size }, () => Array(size).fill(0));
+  const { across: acrossRun, down: downRun } = buildRuns(white, size);
+
+  // Collect all white cells in reading order
+  const whiteCells: Array<[number, number]> = [];
+  for (let r = 1; r < size; r++) {
+    for (let c = 1; c < size; c++) {
+      if (white[r][c]) whiteCells.push([r, c]);
     }
   }
 
-  const values = new Map<string, KakuroDigit>();
-  const solutions: Array<Array<{ row: number; col: number; value: KakuroDigit }>> = [];
+  let nodes = 0;
+  const NODE_BUDGET = size <= 6 ? 5000 : size <= 9 ? 30000 : size <= 12 ? 100000 : 300000;
 
-  // Get constraints for a run
-  function getRunConstraint(
-    row: number, col: number, dr: number, dc: number
-  ): { sum: number; cells: Array<{ row: number; col: number }> } | null {
-    // Find the black cell heading this run
-    let r = row - dr, c = col - dc;
-    while (r >= 0 && c >= 0 && grid[r][c].type === 'white') { r -= dr; c -= dc; }
-    if (r < 0 || c < 0) return null;
-    const black = grid[r][c] as KakuroBlackCell;
-    const clue = dr === 1 ? black.downClue : black.acrossClue;
-    if (clue === null) return null;
-
-    const cells: Array<{ row: number; col: number }> = [];
-    let nr = r + dr, nc = c + dc;
-    while (nr < size && nc < size && grid[nr][nc].type === 'white') {
-      cells.push({ row: nr, col: nc });
-      nr += dr; nc += dc;
+  function getUsedInRun(
+    run: Run,
+    excludeRow: number,
+    excludeCol: number
+  ): Set<number> {
+    const used = new Set<number>();
+    for (const [r, c] of run.cells) {
+      if (r === excludeRow && c === excludeCol) continue;
+      if (grid[r][c] !== 0) used.add(grid[r][c]);
     }
-    return { sum: clue, cells };
+    return used;
   }
 
-  function isConsistent(row: number, col: number, val: KakuroDigit): boolean {
-    for (const [dr, dc] of [[0, 1], [1, 0]]) {
-      const constraint = getRunConstraint(row, col, dr, dc);
-      if (!constraint) continue;
-      const { sum, cells } = constraint;
-      const filled: KakuroDigit[] = [];
-      let runVal = 0;
-      for (const cell of cells) {
-        const v = cell.row === row && cell.col === col ? val : values.get(`${cell.row},${cell.col}`);
-        if (v !== undefined) {
-          if (filled.includes(v)) return false; // duplicate
-          filled.push(v);
-          runVal += v;
-        }
-      }
-      // If all filled, check sum
-      if (filled.length === cells.length && runVal !== sum) return false;
-      // If partial, check not exceeding
-      if (runVal > sum) return false;
+  function backtrack(idx: number): boolean {
+    if (nodes > NODE_BUDGET) return false;
+    nodes++;
+    if (idx === whiteCells.length) return true;
+
+    const [r, c] = whiteCells[idx];
+    const ar = acrossRun[r][c];
+    const dr = downRun[r][c];
+
+    const acrossUsed = ar ? getUsedInRun(ar, r, c) : new Set<number>();
+    const downUsed = dr ? getUsedInRun(dr, r, c) : new Set<number>();
+
+    const digits = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9] as KakuroDigit[], rng);
+
+    for (const d of digits) {
+      if (acrossUsed.has(d) || downUsed.has(d)) continue;
+      grid[r][c] = d;
+      if (backtrack(idx + 1)) return true;
+      grid[r][c] = 0;
     }
-    return true;
+
+    return false;
   }
 
-  function backtrack(idx: number): void {
-    if (solutions.length >= limit) return;
-    if (idx === whiteCells.length) {
-      solutions.push(
-        whiteCells.map(({ row, col }) => ({
-          row, col, value: values.get(`${row},${col}`)!,
-        }))
-      );
-      return;
-    }
-
-    const { row, col } = whiteCells[idx];
-    for (let d = 1; d <= 9; d++) {
-      const digit = d as KakuroDigit;
-      if (isConsistent(row, col, digit)) {
-        values.set(`${row},${col}`, digit);
-        backtrack(idx + 1);
-        values.delete(`${row},${col}`);
-        if (solutions.length >= limit) return;
-      }
-    }
-  }
-
-  backtrack(0);
-  return solutions;
+  return backtrack(0) ? grid : null;
 }
 
 // ─── Generator ────────────────────────────────────────────────────────────────
 
-export function generatePuzzle(difficulty: Difficulty, seed?: number): KakuroGeneratedPuzzle {
-  const actualSeed = seed ?? Math.floor(Math.random() * 2 ** 31);
-  const rng = createRng(actualSeed);
+export function generatePuzzle(
+  difficulty: Difficulty,
+  seed?: number
+): KakuroGeneratedPuzzle {
   const size = KAKURO_SIZE_CONFIG[difficulty];
+  const MAX_ATTEMPTS = 50;
 
-  const white = buildLayout(size, rng);
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const actualSeed =
+      seed !== undefined
+        ? seed + attempt * 1000003
+        : Math.floor(Math.random() * 2 ** 31);
 
-  // Build grid with black cells
-  const grid: KakuroCell[][] = Array.from({ length: size }, (_, r) =>
-    Array.from({ length: size }, (_, c): KakuroCell => {
-      if (!white[r][c]) return { type: 'black', acrossClue: null, downClue: null };
-      return { type: 'white', value: 0, isGiven: false };
-    })
-  );
+    const rng = createRng(actualSeed);
 
-  // First, place a temporary solution to compute clues
-  // Use a simple fill: for each run, assign 1..len
-  function fillRunsSimple(): boolean {
-    // Fill white cells row by row with valid values
+    // Build layout
+    const white = buildLayout(size, rng);
+
+    // Check we have enough white cells to make an interesting puzzle
+    let whiteCount = 0;
     for (let r = 1; r < size; r++) {
       for (let c = 1; c < size; c++) {
-        if (!white[r][c]) continue;
-        // Find used values in across and down runs
-        const acrossUsed = new Set<number>();
-        for (let cc = c - 1; cc >= 1 && white[r][cc]; cc--) {
-          const cell = grid[r][cc] as KakuroWhiteCell;
-          if (cell.value !== 0) acrossUsed.add(cell.value);
-        }
-        const downUsed = new Set<number>();
-        for (let rr = r - 1; rr >= 1 && white[rr][c]; rr--) {
-          const cell = grid[rr][c] as KakuroWhiteCell;
-          if (cell.value !== 0) downUsed.add(cell.value);
-        }
-        const digits = shuffle([1,2,3,4,5,6,7,8,9], rng);
-        const valid = digits.find(d => !acrossUsed.has(d) && !downUsed.has(d));
-        if (!valid) return false;
-        (grid[r][c] as KakuroWhiteCell).value = valid as KakuroDigit;
+        if (white[r][c]) whiteCount++;
       }
     }
-    return true;
-  }
+    if (whiteCount < size * 2) continue; // layout too sparse
 
-  if (!fillRunsSimple()) return generatePuzzle(difficulty, actualSeed + 1);
+    // Fill with valid digits
+    const filledGrid = fillGrid(white, size, rng);
+    if (!filledGrid) continue;
 
-  // Compute clues from filled values
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      if (grid[r][c].type !== 'black') continue;
-      const black = grid[r][c] as KakuroBlackCell;
-
-      // Across clue: sum of run to the right
-      if (c + 1 < size && white[r][c + 1]) {
-        let sum = 0;
-        for (let cc = c + 1; cc < size && white[r][cc]; cc++) {
-          sum += (grid[r][cc] as KakuroWhiteCell).value;
+    // Build Kakuro grid structure with black cells and clues
+    const grid: KakuroCell[][] = Array.from({ length: size }, (_, r) =>
+      Array.from({ length: size }, (_, c): KakuroCell => {
+        if (!white[r][c] || r === 0 || c === 0) {
+          return { type: 'black', acrossClue: null, downClue: null };
         }
-        black.acrossClue = sum;
-      }
+        return { type: 'white', value: 0, isGiven: false };
+      })
+    );
 
-      // Down clue: sum of run below
-      if (r + 1 < size && white[r + 1][c]) {
-        let sum = 0;
-        for (let rr = r + 1; rr < size && white[rr][c]; rr++) {
-          sum += (grid[rr][c] as KakuroWhiteCell).value;
+    // Compute clues for each black cell from the filled solution
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (white[r]?.[c]) continue; // skip white cells
+        const black = grid[r][c] as KakuroBlackCell;
+
+        // Across clue: sum of white run starting at (r, c+1)
+        if (r > 0 && c + 1 < size && white[r][c + 1]) {
+          let sum = 0;
+          for (let cc = c + 1; cc < size && white[r][cc]; cc++) {
+            sum += filledGrid[r][cc];
+          }
+          black.acrossClue = sum;
         }
-        black.downClue = sum;
+
+        // Down clue: sum of white run starting at (r+1, c)
+        if (c > 0 && r + 1 < size && white[r + 1]?.[c]) {
+          let sum = 0;
+          for (let rr = r + 1; rr < size && white[rr][c]; rr++) {
+            sum += filledGrid[rr][c];
+          }
+          black.downClue = sum;
+        }
       }
     }
-  }
 
-  // Extract solution
-  const solution: KakuroSolution = {
-    values: [],
-  };
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      if (grid[r][c].type === 'white') {
-        const cell = grid[r][c] as KakuroWhiteCell;
-        solution.values.push({ row: r, col: c, value: cell.value as KakuroDigit });
-        cell.value = 0; // Clear for puzzle
+    // Extract solution values
+    const solutionValues: Array<{ row: number; col: number; value: KakuroDigit }> = [];
+    for (let r = 1; r < size; r++) {
+      for (let c = 1; c < size; c++) {
+        if (white[r][c]) {
+          solutionValues.push({ row: r, col: c, value: filledGrid[r][c] as KakuroDigit });
+        }
       }
     }
+
+    return {
+      puzzleData: { size, grid },
+      solution: { values: solutionValues },
+      difficulty,
+      seed: actualSeed,
+    };
   }
 
-  return {
-    puzzleData: { size, grid },
-    solution,
-    difficulty,
-    seed: actualSeed,
-  };
+  throw new Error(
+    `[KakuroEngine] Failed to generate ${difficulty} puzzle after ${MAX_ATTEMPTS} attempts`
+  );
 }
 
 // ─── Validator ────────────────────────────────────────────────────────────────
@@ -327,12 +332,13 @@ export function validateKakuroBoard(
         for (let cc = c + 1; cc < size && board[r][cc].type === 'white'; cc++) {
           run.push({ row: r, col: cc, value: (board[r][cc] as KakuroWhiteCell).value });
         }
-        const filled = run.filter(x => x.value !== 0);
-        const vals = filled.map(x => x.value);
+        const filled = run.filter((x) => x.value !== 0);
+        const vals = filled.map((x) => x.value);
         const hasDuplicate = vals.length !== new Set(vals).size;
         const sum = vals.reduce((a, b) => a + b, 0);
-        if (hasDuplicate || (run.every(x => x.value !== 0) && sum !== black.acrossClue)) {
-          run.forEach(x => conflictSet.add(`${x.row},${x.col}`));
+        const complete = run.every((x) => x.value !== 0);
+        if (hasDuplicate || (complete && sum !== black.acrossClue)) {
+          run.forEach((x) => conflictSet.add(`${x.row},${x.col}`));
         }
       }
 
@@ -341,26 +347,30 @@ export function validateKakuroBoard(
         for (let rr = r + 1; rr < size && board[rr][c].type === 'white'; rr++) {
           run.push({ row: rr, col: c, value: (board[rr][c] as KakuroWhiteCell).value });
         }
-        const filled = run.filter(x => x.value !== 0);
-        const vals = filled.map(x => x.value);
+        const filled = run.filter((x) => x.value !== 0);
+        const vals = filled.map((x) => x.value);
         const hasDuplicate = vals.length !== new Set(vals).size;
         const sum = vals.reduce((a, b) => a + b, 0);
-        if (hasDuplicate || (run.every(x => x.value !== 0) && sum !== black.downClue)) {
-          run.forEach(x => conflictSet.add(`${x.row},${x.col}`));
+        const complete = run.every((x) => x.value !== 0);
+        if (hasDuplicate || (complete && sum !== black.downClue)) {
+          run.forEach((x) => conflictSet.add(`${x.row},${x.col}`));
         }
       }
     }
   }
 
   return {
-    conflicts: Array.from(conflictSet).map(k => {
+    conflicts: Array.from(conflictSet).map((k) => {
       const [r, c] = k.split(',').map(Number);
       return { row: r, col: c };
     }),
   };
 }
 
-export function isKakuroSolved(board: KakuroCell[][], size: number, solution: KakuroSolution): boolean {
+export function isKakuroSolved(
+  board: KakuroCell[][],
+  solution: KakuroSolution
+): boolean {
   for (const { row, col, value } of solution.values) {
     if ((board[row][col] as KakuroWhiteCell).value !== value) return false;
   }
@@ -378,7 +388,9 @@ export function getHint(
     if (cell.value === 0) {
       const newBoard = gameState.board.map((r, ri) =>
         r.map((c, ci): KakuroCell => {
-          if (ri === row && ci === col) return { ...c, value } as KakuroWhiteCell;
+          if (ri === row && ci === col) {
+            return { ...(c as KakuroWhiteCell), value } as KakuroWhiteCell;
+          }
           return { ...c };
         })
       );

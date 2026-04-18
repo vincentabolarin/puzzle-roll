@@ -1,14 +1,14 @@
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, usePathname } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorBoundary } from 'react-error-boundary';
 import { GameType } from '@puzzle-roll/shared';
-import { apiClient } from '../../../src/lib/api-client';
-import { queryKeys } from '../../../src/lib/query-client';
-import { puzzleCache } from '../../../src/services/puzzle-cache.service';
-import { useBreakpoint } from '../../../src/hooks/useBreakpoint';
-import SudokuGame from '../../../src/components/game/SudokuGame';
+import { apiClient } from '@/lib/api-client';
+import { queryKeys } from '@/lib/query-client';
+import { puzzleCache } from '@/services/puzzle-cache.service';
+import { useBreakpoint } from '@/hooks/useBreakpoint';
+import SudokuGame from '@/components/game/SudokuGame';
 
 const GAME_COMPONENTS: Partial<Record<GameType, React.ComponentType<{ puzzleId: string; puzzleData: unknown; solution: unknown; isDaily: boolean; dailyPuzzleId: string | null }>>> = {
   [GameType.SUDOKU]: SudokuGame,
@@ -31,6 +31,13 @@ function GameErrorFallback({ error, resetErrorBoundary }: { error: Error; resetE
 }
 
 export default function ActivePuzzleScreen() {
+
+  const pathname = usePathname();
+  const params = useLocalSearchParams();
+
+  console.log('Route:', pathname);
+  console.log('Params:', params);
+  
   const { gameType, puzzleId } = useLocalSearchParams<{ gameType: string; puzzleId: string }>();
   const { isTablet } = useBreakpoint();
 

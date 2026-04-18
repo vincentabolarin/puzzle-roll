@@ -1,7 +1,7 @@
 import '../global.css';
 import { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack } from 'expo-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -13,7 +13,6 @@ import { queryClient } from '../src/lib/query-client';
 import { puzzleCache } from '../src/services/puzzle-cache.service';
 import { syncService } from '../src/services/sync.service';
 import { useNetworkStatus } from '../src/hooks/useNetworkStatus';
-import { useOfflineQueueStore } from '../src/stores/offline-queue.store';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -31,7 +30,6 @@ function RootLayout() {
     'JetBrainsMono-Regular': require('../assets/fonts/JetBrainsMono-Regular.ttf'),
   });
 
-  // Init SQLite and hydrate stores
   useEffect(() => {
     async function init() {
       await puzzleCache.init();
@@ -44,14 +42,12 @@ function RootLayout() {
     init();
   }, []);
 
-  // Flush offline queue when connectivity restored
   useEffect(() => {
     if (isConnected && user) {
       syncService.flushOfflineQueue();
     }
   }, [isConnected, user]);
 
-  // Fetch and cache daily puzzles on launch
   useEffect(() => {
     if (isConnected && user && dbReady) {
       syncService.fetchAndCacheDailyPuzzles();
@@ -86,6 +82,11 @@ function RootLayout() {
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen name="(auth)" options={{ headerShown: false, presentation: 'modal' }} />
+              {/*
+                "game" resolves because app/game/_layout.tsx now exists.
+                Router v4 treats that directory as a named segment group.
+                All screens inside app/game/** are handled by game/_layout.tsx.
+              */}
               <Stack.Screen name="game" options={{ headerShown: false }} />
             </Stack>
           )}

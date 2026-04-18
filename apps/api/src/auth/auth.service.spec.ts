@@ -17,8 +17,8 @@ jest.mock('@puzzle-roll/database', () => ({
 
 const { prisma } = jest.requireMock('@puzzle-roll/database');
 
-// Mock bcrypt
-jest.mock('bcrypt', () => ({
+// Mock bcryptjs
+jest.mock('bcryptjs', () => ({
   hash: jest.fn().mockResolvedValue('hashed_password'),
   compare: jest.fn().mockResolvedValue(true),
 }));
@@ -110,7 +110,7 @@ describe('AuthService', () => {
     });
 
     it('throws UnauthorizedException on wrong password', async () => {
-      const bcrypt = jest.requireMock('bcrypt');
+      const bcrypt = jest.requireMock('bcryptjs');
       bcrypt.compare.mockResolvedValueOnce(false);
 
       prisma.user.findUnique.mockResolvedValue({

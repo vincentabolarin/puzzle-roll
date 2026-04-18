@@ -68,6 +68,16 @@ async function refreshAccessToken(): Promise<string | null> {
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, skipAuth = false } = options;
 
+  const requestId = Math.random().toString(36).substring(7);
+  const startTime = Date.now();
+
+  console.log(`[API REQUEST] [${requestId}]`, {
+    method,
+    url: `${API_URL}${path}`,
+    body,
+    headers,
+  });
+
   const buildHeaders = (token?: string | null): Record<string, string> => ({
     'Content-Type': 'application/json',
     ...(!skipAuth && token ? { Authorization: `Bearer ${token}` } : {}),
@@ -82,26 +92,57 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     });
 
   const { accessToken } = useAuthStore.getState();
-  let response = await doFetch(accessToken);
+
+  let response: Response;
+
+  try {
+    response = await doFetch(accessToken);
+  } catch (error) {
+    console.log(`[API NETWORK ERROR] [${requestId}]`, error);
+    throw error;
+  }
 
   // Token expired — attempt refresh once
   if (response.status === 401 && !skipAuth) {
-    const newToken = await refreshAccessToken();
-    if (newToken) {
-      response = await doFetch(newToken);
-    }
+  console.log(`[API 401] [${requestId}] Token expired, refreshing...`);
+
+  const newToken = await refreshAccessToken();
+
+  if (newToken) {
+    console.log(`[API RETRY] [${requestId}] Retrying with new token`);
+    response = await doFetch(newToken);
+  } else {
+    console.log(`[API AUTH FAILED] [${requestId}] Could not refresh token`);
   }
+}
 
   if (!response.ok) {
-    let errorBody: ApiError = { statusCode: response.status, message: response.statusText };
+    let errorBody: ApiError = {
+      statusCode: response.status,
+      message: response.statusText,
+    };
+
     try {
       const json = await response.json() as { data: ApiError };
       errorBody = json.data ?? errorBody;
     } catch {}
+
+    console.log(`[API ERROR] [${requestId}]`, {
+      status: response.status,
+      error: errorBody,
+    });
+
     throw new ApiClientError(errorBody.message, response.status, errorBody);
   }
 
   const json = await response.json() as { data: T };
+
+  console.log(`[API SUCCESS] [${requestId}]`, {
+    status: response.status,
+    duration: `${Date.now() - startTime}ms`,
+    data: json.data,
+  });
+
   return json.data;
 }
 

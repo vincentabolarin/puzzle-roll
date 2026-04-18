@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { LeaderboardService } from './leaderboard.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser, JwtPayload } from '../common/decorators/current-user.decorator';
+import { GameType } from '@puzzle-roll/shared';
 
 @ApiTags('leaderboard')
 @ApiBearerAuth()
@@ -14,7 +15,7 @@ export class LeaderboardController {
   @Get(':gameType/daily')
   @ApiOperation({ summary: "Get today's daily leaderboard for a game type" })
   async getDailyLeaderboard(
-    @Param('gameType') gameType: string,
+    @Param('gameType') gameType: GameType,
     @CurrentUser() user: JwtPayload
   ) {
     return this.leaderboardService.getDailyLeaderboard(gameType, user.sub);
@@ -22,7 +23,7 @@ export class LeaderboardController {
 
   @Get(':gameType/alltime')
   @ApiOperation({ summary: 'Get all-time leaderboard for a game type' })
-  async getAllTimeLeaderboard(@Param('gameType') gameType: string) {
+  async getAllTimeLeaderboard(@Param('gameType') gameType: GameType) {
     return this.leaderboardService.getAllTimeLeaderboard(gameType);
   }
 }

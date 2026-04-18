@@ -289,50 +289,70 @@ function countTangoSolutions(
 
 // ─── Generator ────────────────────────────────────────────────────────────────
 
-export function generatePuzzle(difficulty: Difficulty, seed?: number): TangoGeneratedPuzzle {
-  const actualSeed = seed ?? Math.floor(Math.random() * 2 ** 31);
-  const rng = createRng(actualSeed);
-  const size = TANGO_SIZE_CONFIG[difficulty];
+export function generatePuzzle(
+  difficulty: Difficulty,
+  seed?: number
+): TangoGeneratedPuzzle {
+  const MAX_ATTEMPTS = 200;
 
-  const constraints = generateConstraints(size, Array.from({ length: size }, () => Array(size).fill('empty')), rng);
-  const solution = generateSolution(size, constraints, rng);
-  if (!solution) return generatePuzzle(difficulty, actualSeed + 1);
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const actualSeed =
+      seed !== undefined
+        ? seed + attempt * 1000003
+        : Math.floor(Math.random() * 2 ** 31);
 
-  // Rebuild constraints from actual solution
-  const realConstraints = generateConstraints(size, solution, rng);
-  const verifiedSolution = generateSolution(size, realConstraints, rng);
-  if (!verifiedSolution) return generatePuzzle(difficulty, actualSeed + 1);
+    const rng = createRng(actualSeed);
+    const size = TANGO_SIZE_CONFIG[difficulty];
 
-  // Build given grid (empty by default, reveal based on difficulty)
-  const revealRate: Record<Difficulty, number> = {
-    [Difficulty.EASY]: 0.35,
-    [Difficulty.MEDIUM]: 0.2,
-    [Difficulty.HARD]: 0.1,
-    [Difficulty.EXPERT]: 0.05,
-  };
+    const constraints = generateConstraints(
+      size,
+      Array.from({ length: size }, () => Array(size).fill('empty')),
+      rng
+    );
 
-  const positions = Array.from({ length: size * size }, (_, i) => i);
-  shuffle(positions, rng);
-  const revealCount = Math.floor(size * size * revealRate[difficulty]);
+    const solution = generateSolution(size, constraints, rng);
+    if (!solution) continue;
 
-  const given: TangoSymbol[][] = Array.from({ length: size }, () => Array(size).fill('empty'));
-  for (let i = 0; i < revealCount; i++) {
-    const pos = positions[i];
-    const r = Math.floor(pos / size);
-    const c = pos % size;
-    given[r][c] = verifiedSolution[r][c];
+    const realConstraints = generateConstraints(size, solution, rng);
+    const verifiedSolution = generateSolution(size, realConstraints, rng);
+    if (!verifiedSolution) continue;
+
+    const revealRate: Record<Difficulty, number> = {
+      easy: 0.35,
+      medium: 0.2,
+      hard: 0.1,
+      expert: 0.05,
+    };
+
+    const positions = Array.from({ length: size * size }, (_, i) => i);
+    shuffle(positions, rng);
+
+    const revealCount = Math.floor(size * size * revealRate[difficulty]);
+
+    const given: TangoSymbol[][] = Array.from({ length: size }, () =>
+      Array(size).fill('empty')
+    );
+
+    for (let i = 0; i < revealCount; i++) {
+      const pos = positions[i];
+      const r = Math.floor(pos / size);
+      const c = pos % size;
+      given[r][c] = verifiedSolution[r][c];
+    }
+
+    if (countTangoSolutions(size, given, realConstraints, 2) !== 1) {
+      continue;
+    }
+
+    return {
+      puzzleData: { size, given, constraints: realConstraints },
+      solution: { grid: verifiedSolution },
+      difficulty,
+      seed: actualSeed,
+    };
   }
 
-  if (countTangoSolutions(size, given, realConstraints, 2) !== 1) {
-    return generatePuzzle(difficulty, actualSeed + 1);
-  }
-
-  return {
-    puzzleData: { size, given, constraints: realConstraints },
-    solution: { grid: verifiedSolution },
-    difficulty,
-    seed: actualSeed,
-  };
+  throw new Error(`[TangoEngine] Failed after ${MAX_ATTEMPTS} attempts`);
 }
 
 // ─── Validator ────────────────────────────────────────────────────────────────

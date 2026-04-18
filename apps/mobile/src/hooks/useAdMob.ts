@@ -1,132 +1,155 @@
-import { useEffect, useCallback } from 'react';
-import {
-  InterstitialAd,
-  RewardedAd,
-  AdEventType,
-  RewardedAdEventType,
-  TestIds,
-} from 'react-native-google-mobile-ads';
+import { useCallback, useEffect, useRef } from 'react';
+import Constants from 'expo-constants';
 import { useAdsStore } from '../stores/ads.store';
+
+// react-native-google-mobile-ads requires a custom dev build.
+// Expo Go does not include native AdMob bindings — importing the module
+// at the top level would crash the entire module graph.
+// We lazy-load it only when we know we're running in a real native build.
+
+const IS_EXPO_GO = Constants.appOwnership === 'expo';
+
+// Lazy import type — only used for the type annotation, not evaluated at runtime
+type AdModule = typeof import('react-native-google-mobile-ads');
+
+type RewardedAdInstance = ReturnType<
+  typeof import('react-native-google-mobile-ads')['RewardedAd']['createForAdRequest']
+>;
+
+type InterstitialAdInstance = ReturnType<
+  typeof import('react-native-google-mobile-ads')['InterstitialAd']['createForAdRequest']
+>;
+
+let adModuleCache: AdModule | null = null;
+
+async function getAdModule(): Promise<AdModule | null> {
+  if (IS_EXPO_GO) return null;
+  if (adModuleCache) return adModuleCache;
+  try {
+    adModuleCache = await import('react-native-google-mobile-ads');
+    return adModuleCache;
+  } catch {
+    return null;
+  }
+}
 
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
 const INTERSTITIAL_ID = IS_DEV
-  ? TestIds.INTERSTITIAL
-  : (process.env.EXPO_PUBLIC_ADMOB_INTERSTITIAL_ID ?? TestIds.INTERSTITIAL);
+  ? 'ca-app-pub-3940256099942544/1033173712' // Google test ID
+  : (process.env.EXPO_PUBLIC_ADMOB_INTERSTITIAL_ID ?? 'ca-app-pub-3940256099942544/1033173712');
 
 const REWARDED_ID = IS_DEV
-  ? TestIds.REWARDED
-  : (process.env.EXPO_PUBLIC_ADMOB_REWARDED_ID ?? TestIds.REWARDED);
-
-// Singleton ad instances — loaded outside component lifecycle
-let interstitial: InterstitialAd | null = null;
-let rewarded: RewardedAd | null = null;
-
-function getInterstitial(): InterstitialAd {
-  if (!interstitial) {
-    interstitial = InterstitialAd.createForAdRequest(INTERSTITIAL_ID, {
-      requestNonPersonalizedAdsOnly: true,
-    });
-  }
-  return interstitial;
-}
-
-function getRewarded(): RewardedAd {
-  if (!rewarded) {
-    rewarded = RewardedAd.createForAdRequest(REWARDED_ID, {
-      requestNonPersonalizedAdsOnly: true,
-    });
-  }
-  return rewarded;
-}
+  ? 'ca-app-pub-3940256099942544/5224354917' // Google test ID
+  : (process.env.EXPO_PUBLIC_ADMOB_REWARDED_ID ?? 'ca-app-pub-3940256099942544/5224354917');
 
 export function useAdMob() {
   const { setRewardedAdReady, setInterstitialShowing, recordCompletion } = useAdsStore();
+  // const rewardedRef = useRef<InstanceType<AdModule['RewardedAd']> | null>(null);
+  // const interstitialRef = useRef<InstanceType<AdModule['InterstitialAd']> | null>(null);
 
-  // Pre-load rewarded ad on mount
+  const rewardedRef = useRef<RewardedAdInstance | null>(null);
+  const interstitialRef = useRef<InterstitialAdInstance | null>(null);
+
+  // Pre-load rewarded ad on mount (only in real native builds)
   useEffect(() => {
-    const ad = getRewarded();
+    if (IS_EXPO_GO) return;
 
-    const loadedListener = ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
-      setRewardedAdReady(true);
-    });
+    let cleanupFns: Array<() => void> = [];
 
-    const closedListener = ad.addAdEventListener(AdEventType.CLOSED, () => {
-      setRewardedAdReady(false);
-      // Reload for next use
+    getAdModule().then((mod) => {
+      if (!mod) return;
+      const { RewardedAd, AdEventType, RewardedAdEventType } = mod;
+
+      const ad = RewardedAd.createForAdRequest(REWARDED_ID, {
+        requestNonPersonalizedAdsOnly: true,
+      });
+      rewardedRef.current = ad;
+
+      cleanupFns.push(
+        ad.addAdEventListener(RewardedAdEventType.LOADED, () => setRewardedAdReady(true))
+      );
+      cleanupFns.push(
+        ad.addAdEventListener(AdEventType.CLOSED, () => {
+          setRewardedAdReady(false);
+          ad.load();
+        })
+      );
+
       ad.load();
     });
 
-    ad.load();
-
-    return () => {
-      loadedListener();
-      closedListener();
-    };
+    return () => cleanupFns.forEach((fn) => fn());
   }, [setRewardedAdReady]);
 
   const showInterstitialIfDue = useCallback(async (): Promise<void> => {
     const shouldShow = recordCompletion();
-    if (!shouldShow) return;
+    if (!shouldShow || IS_EXPO_GO) return;
 
-    const ad = getInterstitial();
+    const mod = await getAdModule();
+    if (!mod) return;
+
+    const { InterstitialAd, AdEventType } = mod;
+    const ad = InterstitialAd.createForAdRequest(INTERSTITIAL_ID, {
+      requestNonPersonalizedAdsOnly: true,
+    });
+    interstitialRef.current = ad;
     ad.load();
 
     return new Promise((resolve) => {
-      const loadedListener = ad.addAdEventListener(AdEventType.LOADED, () => {
-        loadedListener();
+      const loadedUnsub = ad.addAdEventListener(AdEventType.LOADED, () => {
+        loadedUnsub();
         setInterstitialShowing(true);
-        ad.show().catch(() => {
-          setInterstitialShowing(false);
-          resolve();
-        });
+        ad.show().catch(resolve);
       });
 
-      const closedListener = ad.addAdEventListener(AdEventType.CLOSED, () => {
-        closedListener();
+      const closedUnsub = ad.addAdEventListener(AdEventType.CLOSED, () => {
+        closedUnsub();
         setInterstitialShowing(false);
         resolve();
       });
 
-      const errorListener = ad.addAdEventListener(AdEventType.ERROR, () => {
-        errorListener();
-        resolve(); // silently fail
+      const errorUnsub = ad.addAdEventListener(AdEventType.ERROR, () => {
+        errorUnsub();
+        resolve();
       });
     });
   }, [recordCompletion, setInterstitialShowing]);
 
   const showRewardedAd = useCallback((): Promise<boolean> => {
+    // In Expo Go or if ad module unavailable, always grant the hint
+    if (IS_EXPO_GO) return Promise.resolve(true);
+
     return new Promise((resolve) => {
-      const ad = getRewarded();
+      const ad = rewardedRef.current;
+      if (!ad) { resolve(true); return; }
+
       const { isRewardedAdReady } = useAdsStore.getState();
+      if (!isRewardedAdReady) { resolve(true); return; }
 
-      if (!isRewardedAdReady) {
-        // Grant hint anyway on ad failure
-        resolve(true);
-        return;
-      }
+      getAdModule().then((mod) => {
+        if (!mod) { resolve(true); return; }
 
-      let rewarded = false;
+        const { AdEventType, RewardedAdEventType } = mod;
+        let rewarded = false;
 
-      const earnedListener = ad.addAdEventListener(
-        RewardedAdEventType.EARNED_REWARD,
-        () => { rewarded = true; }
-      );
+        const earnedUnsub = ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+          rewarded = true;
+        });
+        const closedUnsub = ad.addAdEventListener(AdEventType.CLOSED, () => {
+          earnedUnsub();
+          closedUnsub();
+          setRewardedAdReady(false);
+          ad.load();
+          resolve(rewarded || true);
+        });
+        const errorUnsub = ad.addAdEventListener(AdEventType.ERROR, () => {
+          errorUnsub();
+          resolve(true);
+        });
 
-      const closedListener = ad.addAdEventListener(AdEventType.CLOSED, () => {
-        earnedListener();
-        closedListener();
-        setRewardedAdReady(false);
-        ad.load();
-        resolve(rewarded || true); // grant hint even if ad closed without earning
+        ad.show().catch(() => resolve(true));
       });
-
-      const errorListener = ad.addAdEventListener(AdEventType.ERROR, () => {
-        errorListener();
-        resolve(true); // grant hint on error
-      });
-
-      ad.show().catch(() => resolve(true));
     });
   }, [setRewardedAdReady]);
 

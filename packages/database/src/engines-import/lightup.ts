@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/lightup';
+export { generateLightUp } from '@puzzle-roll/shared';

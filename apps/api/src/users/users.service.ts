@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { prisma } from '@puzzle-roll/database';
+// import { prisma } from '@puzzle-roll/database';
 import { GameType } from '@puzzle-roll/shared';
 import { UpdateNotificationsDto, UpdateSettingsDto } from './users.dto';
+import { PrismaService } from '../common/prisma/prisma.service';
 
 @Injectable()
 export class UsersService {
+  constructor(
+    private readonly prisma: PrismaService,
+  ) {}
   async getMe(userId: string) {
-    const user = await prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
         settings: true,
@@ -19,7 +23,7 @@ export class UsersService {
   }
 
   async getStats(userId: string) {
-    const stats = await prisma.userStats.findMany({
+    const stats = await this.prisma.userStats.findMany({
       where: { userId },
       orderBy: { gameType: 'asc' },
     });
@@ -34,7 +38,7 @@ export class UsersService {
     if (dto.timezoneOffsetMinutes !== undefined) settingsData['timezoneOffsetMinutes'] = dto.timezoneOffsetMinutes;
 
     if (Object.keys(settingsData).length > 0) {
-      await prisma.userSettings.upsert({
+      await this.prisma.userSettings.upsert({
         where: { userId },
         create: { userId, ...settingsData },
         update: settingsData,
@@ -42,7 +46,7 @@ export class UsersService {
     }
 
     if (dto.pushToken && dto.platform) {
-      await prisma.pushToken.upsert({
+      await this.prisma.pushToken.upsert({
         where: { token: dto.pushToken },
         create: { userId, token: dto.pushToken, platform: dto.platform },
         update: { userId },
@@ -58,7 +62,7 @@ export class UsersService {
     if (dto.hapticsEnabled !== undefined) settingsData['hapticsEnabled'] = dto.hapticsEnabled;
     if (dto.autoRemoveNotes !== undefined) settingsData['autoRemoveNotes'] = dto.autoRemoveNotes;
 
-    await prisma.userSettings.upsert({
+    await this.prisma.userSettings.upsert({
       where: { userId },
       create: { userId, ...settingsData },
       update: settingsData,
@@ -69,15 +73,15 @@ export class UsersService {
 
   async upsertStats(
     userId: string,
-    gameType: string,
+    gameType: GameType,
     elapsedSeconds: number,
     completed: boolean,
     isDaily: boolean,
     completedDate: string
   ) {
-    const gt = gameType as Parameters<typeof prisma.userStats.findUnique>[0]['where']['userId_gameType']['gameType'];
+    const gt = gameType;
 
-    const existing = await prisma.userStats.findUnique({
+    const existing = await this.prisma.userStats.findUnique({
       where: { userId_gameType: { userId, gameType: gt } },
     });
 
@@ -101,7 +105,7 @@ export class UsersService {
         ? elapsedSeconds
         : existing?.bestTime ?? null;
 
-    await prisma.userStats.upsert({
+    await this.prisma.userStats.upsert({
       where: { userId_gameType: { userId, gameType: gt } },
       create: {
         userId,

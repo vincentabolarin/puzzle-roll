@@ -6,8 +6,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { prisma } from '@puzzle-roll/database';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import {
   RegisterDto,
@@ -18,6 +17,7 @@ import {
   UpgradeAccountDto,
 } from './auth.dto';
 import { JwtPayload } from '../common/decorators/current-user.decorator';
+import { PrismaService } from '../common/prisma/prisma.service';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -25,7 +25,8 @@ const BCRYPT_ROUNDS = 12;
 export class AuthService {
   constructor(
     private readonly jwtService: JwtService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private prisma: PrismaService
   ) {}
 
   private generateTokens(payload: JwtPayload): { accessToken: string; refreshToken: string } {
@@ -43,12 +44,12 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto): Promise<AuthResponseDto> {
-    const existing = await prisma.user.findUnique({ where: { email: dto.email } });
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) throw new ConflictException('Email already registered');
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
-    const user = await prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         email: dto.email,
         passwordHash,
@@ -64,7 +65,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<AuthResponseDto> {
-    const user = await prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -88,7 +89,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    const user = await prisma.user.findUnique({ where: { id: decoded.sub } });
+    const user = await this.prisma.user.findUnique({ where: { id: decoded.sub } });
     if (!user) throw new UnauthorizedException('User not found');
 
     const payload: JwtPayload = { sub: user.id, email: user.email, isAnonymous: user.isAnonymous };
@@ -99,12 +100,12 @@ export class AuthService {
 
   async createAnonymousSession(dto: AnonymousSessionDto): Promise<AuthResponseDto> {
     let user = dto.deviceId
-      ? await prisma.user.findUnique({ where: { deviceId: dto.deviceId } })
+      ? await this.prisma.user.findUnique({ where: { deviceId: dto.deviceId } })
       : null;
 
     if (!user) {
       const deviceId = dto.deviceId ?? uuidv4();
-      user = await prisma.user.create({
+      user = await this.prisma.user.create({
         data: {
           deviceId,
           isAnonymous: true,
@@ -120,17 +121,17 @@ export class AuthService {
   }
 
   async upgradeAccount(userId: string, dto: UpgradeAccountDto): Promise<AuthResponseDto> {
-    const existing = await prisma.user.findUnique({ where: { email: dto.email } });
+    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) throw new ConflictException('Email already registered');
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.isAnonymous) {
       throw new BadRequestException('Account is already registered');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
-    const updated = await prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { email: dto.email, passwordHash, isAnonymous: false },
     });

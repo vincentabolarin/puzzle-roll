@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { prisma } from '@puzzle-roll/database';
+import { GameType } from '@puzzle-roll/shared';
+import { PrismaService } from '../common/prisma/prisma.service';
 
 function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
@@ -7,13 +8,14 @@ function todayUTC(): string {
 
 @Injectable()
 export class LeaderboardService {
-  async getDailyLeaderboard(gameType: string, userId: string, limit = 100) {
+  constructor(private readonly prisma: PrismaService) {}
+  async getDailyLeaderboard(gameType: GameType, userId: string, limit = 100) {
     const date = todayUTC();
 
-    const daily = await prisma.dailyPuzzle.findUnique({
+    const daily = await this.prisma.dailyPuzzle.findUnique({
       where: {
         gameType_date: {
-          gameType: gameType as Parameters<typeof prisma.dailyPuzzle.findUnique>[0]['where']['gameType_date']['gameType'],
+          gameType: gameType as GameType,
           date,
         },
       },
@@ -21,7 +23,7 @@ export class LeaderboardService {
 
     if (!daily) return { gameType, date, entries: [], userEntry: null };
 
-    const completions = await prisma.gameCompletion.findMany({
+    const completions = await this.prisma.gameCompletion.findMany({
       where: { dailyPuzzleId: daily.id },
       orderBy: [{ elapsedSeconds: 'asc' }, { hintsUsed: 'asc' }, { completedAt: 'asc' }],
       take: limit,
@@ -43,13 +45,13 @@ export class LeaderboardService {
 
     // If user completed but is outside top N, fetch their rank separately
     if (!userEntry) {
-      const userCompletion = await prisma.gameCompletion.findFirst({
+      const userCompletion = await this.prisma.gameCompletion.findFirst({
         where: { dailyPuzzleId: daily.id, userId },
         include: { user: { select: { id: true, email: true } } },
       });
 
       if (userCompletion) {
-        const rank = await prisma.gameCompletion.count({
+        const rank = await this.prisma.gameCompletion.count({
           where: {
             dailyPuzzleId: daily.id,
             OR: [
@@ -83,12 +85,12 @@ export class LeaderboardService {
     return { gameType, date, entries, userEntry };
   }
 
-  async getAllTimeLeaderboard(gameType: string, limit = 100) {
+  async getAllTimeLeaderboard(gameType: GameType, limit = 100) {
     // Best time per user for this game type across all non-daily completions
-    const results = await prisma.gameCompletion.groupBy({
+    const results = await this.prisma.gameCompletion.groupBy({
       by: ['userId'],
       where: {
-        gameType: gameType as Parameters<typeof prisma.gameCompletion.groupBy>[0]['where']['gameType'],
+        gameType: gameType as GameType,
         isDaily: false,
       },
       _min: { elapsedSeconds: true },
@@ -98,7 +100,7 @@ export class LeaderboardService {
     });
 
     const userIds = results.map((r) => r.userId);
-    const users = await prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: { id: { in: userIds } },
       select: { id: true, email: true },
     });

@@ -25,7 +25,7 @@ function ErrorFallback({ resetErrorBoundary }: { resetErrorBoundary: () => void 
 }
 
 export default function DailyPuzzleScreen() {
-  const { gameType } = useLocalSearchParams<{ gameType: string }>();
+  const { gameType } = useLocalSearchParams<{ gameType: GameType }>();
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.puzzles.daily(gameType ?? ''),

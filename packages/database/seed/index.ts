@@ -1,19 +1,29 @@
+import path from 'path';
+import dotenv from 'dotenv';
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
 import { PrismaClient, GameType, Difficulty } from '../prisma/generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { SudokuEngine } from '@puzzle-roll/shared';
-import { generatePuzzle as generateQueens } from '../../../packages/shared/src/engines/queens';
-import { generatePuzzle as generateZip } from '../../../packages/shared/src/engines/zip';
-import { generatePuzzle as generateTango } from '../../../packages/shared/src/engines/tango';
-import { generatePuzzle as generateNonogram } from '../../../packages/shared/src/engines/nonogram';
-import { generatePuzzle as generateMinesweeper } from '../../../packages/shared/src/engines/minesweeper';
-import { generatePuzzle as generateKakuro } from '../../../packages/shared/src/engines/kakuro';
-import { generatePuzzle as generateLightUp } from '../../../packages/shared/src/engines/lightup';
-import { generatePuzzle as generateFutoshiki } from '../../../packages/shared/src/engines/futoshiki';
-import { generatePuzzle as generateHitori } from '../../../packages/shared/src/engines/hitori';
+import { SudokuEngine , generateQueens , generateZip , generateTango, generateNonogram, generateMinesweeper, generateKakuro, generateLightUp, generateFutoshiki, generateHitori } from '@puzzle-roll/shared';
 import { SqlDriverAdapterFactory } from '@prisma/client/runtime/client';
 
+// const connectionString = process.env.DATABASE_URL;
+// if (!connectionString) throw new Error('DATABASE_URL is not set. Check your .env file.');
+
+// Load the root .env before anything else.
+console.log('env file path', path.resolve(__dirname, '../.env'))
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+// DATABASE_URL is now available in process.env
 const connectionString = process.env.DATABASE_URL;
-if (!connectionString) throw new Error('DATABASE_URL is not set. Check your .env file.');
+
+if (!connectionString) {
+  throw new Error(
+    '[prisma.config.ts] DATABASE_URL is not set. ' +
+    'Ensure a .env file exists at the specified path with DATABASE_URL defined.'
+  );
+}
 
 const adapter: SqlDriverAdapterFactory = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
@@ -43,12 +53,6 @@ const GENERATORS: Record<GameType, GeneratorFn> = {
   hitori: (d, s) => generateHitori(d as Parameters<typeof generateHitori>[0], s),
 };
 
-function getStartDate(): Date {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
-}
-
 function toISODate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -60,37 +64,58 @@ async function seedPuzzles(): Promise<Map<string, string[]>> {
   for (const gameType of GAME_TYPES) {
     for (const difficulty of DIFFICULTIES) {
       const key = `${gameType}:${difficulty}`;
-      const ids: string[] = [];
+      const batch: {
+        gameType: GameType;
+        difficulty: Difficulty;
+        puzzleData: object;
+        solution: object;
+        seed: number;
+      }[] = [];
+
       console.log(`  Generating ${PUZZLES_PER_DIFFICULTY} ${difficulty} ${gameType} puzzles...`);
 
       for (let i = 0; i < PUZZLES_PER_DIFFICULTY; i++) {
-        const seed = parseInt(`${Date.now()}${i}`.slice(-9)) + i * 997 + GAME_TYPES.indexOf(gameType) * 10000 + DIFFICULTIES.indexOf(difficulty) * 100000;
-        
-        let puzzleData: unknown;
-        let solution: unknown;
-        let actualSeed: number;
+        const seed =
+          parseInt(`${Date.now()}${i}`.slice(-9)) +
+          i * 997 +
+          GAME_TYPES.indexOf(gameType) * 10000 +
+          DIFFICULTIES.indexOf(difficulty) * 100000;
+
+        const label = `  generate-${gameType}-${difficulty}-${i}`;
+        console.time(label);
 
         try {
-          const result = GENERATORS[gameType](difficulty, seed);
-          puzzleData = result.puzzleData;
-          solution = result.solution;
-          actualSeed = result.seed;
-        } catch (err) {
-          console.error(`    ⚠️  Failed to generate ${gameType} ${difficulty} #${i}: ${err}`);
-          continue;
-        }
-
-        const puzzle = await prisma.gamePuzzle.create({
-          data: {
-            gameType: gameType as GameType,
-            difficulty: difficulty as Difficulty,
+          const { puzzleData, solution, seed: actualSeed } = GENERATORS[gameType](difficulty, seed);
+          batch.push({
+            gameType,
+            difficulty,
             puzzleData: puzzleData as object,
             solution: solution as object,
-            seed: actualSeed!,
-          },
-        });
+            seed: actualSeed,
+          });
+        } catch (err) {
+          console.error(`    ⚠️  Failed to generate ${gameType} ${difficulty} #${i}: ${err}`);
+        }
 
-        ids.push(puzzle.id);
+        console.timeEnd(label);
+      }
+
+      if (batch.length === 0) {
+        console.warn(`  ⚠️  No puzzles generated for ${key}, skipping DB insert`);
+        puzzleIdMap.set(key, []);
+        continue;
+      }
+
+      // Insert one by one so we get back each created ID reliably.
+      // createMany doesn't return IDs in Prisma, and findMany after createMany
+      // would fetch ALL rows for that game/difficulty — not just the new batch.
+      const ids: string[] = [];
+      for (const row of batch) {
+        const created = await prisma.gamePuzzle.create({
+          data: row,
+          select: { id: true },
+        });
+        ids.push(created.id);
       }
 
       puzzleIdMap.set(key, ids);
@@ -104,8 +129,12 @@ async function seedPuzzles(): Promise<Map<string, string[]>> {
 async function seedDailyPuzzles(puzzleIdMap: Map<string, string[]>): Promise<void> {
   console.log('\n📅 Assigning daily puzzles for 365 days...');
 
-  const startDate = getStartDate();
+  const startDate = new Date();
+  startDate.setUTCHours(0, 0, 0, 0);
+
   const usedIndices = new Map<string, number>();
+
+  const dailyDifficulties: Difficulty[] = ['medium', 'hard', 'medium', 'hard', 'easy', 'expert'];
 
   for (let dayOffset = 0; dayOffset < DAILY_DAYS; dayOffset++) {
     const date = new Date(startDate);
@@ -113,8 +142,6 @@ async function seedDailyPuzzles(puzzleIdMap: Map<string, string[]>): Promise<voi
     const dateStr = toISODate(date);
 
     for (const gameType of GAME_TYPES) {
-      // Cycle through all difficulties but bias towards medium/hard for daily
-      const dailyDifficulties: Difficulty[] = ['medium', 'hard', 'medium', 'hard', 'easy', 'expert'];
       const difficulty = dailyDifficulties[dayOffset % dailyDifficulties.length];
       const key = `${gameType}:${difficulty}`;
       const ids = puzzleIdMap.get(key) ?? [];
@@ -129,12 +156,8 @@ async function seedDailyPuzzles(puzzleIdMap: Map<string, string[]>): Promise<voi
       usedIndices.set(key, currentIdx + 1);
 
       await prisma.dailyPuzzle.upsert({
-        where: { gameType_date: { gameType: gameType as GameType, date: dateStr } },
-        create: {
-          gameType: gameType as GameType,
-          date: dateStr,
-          puzzleId,
-        },
+        where: { gameType_date: { gameType, date: dateStr } },
+        create: { gameType, date: dateStr, puzzleId },
         update: { puzzleId },
       });
     }
@@ -144,13 +167,14 @@ async function seedDailyPuzzles(puzzleIdMap: Map<string, string[]>): Promise<voi
     }
   }
 
-  console.log(`  ✅ ${DAILY_DAYS} days × ${GAME_TYPES.length} games = ${DAILY_DAYS * GAME_TYPES.length} daily puzzle assignments`);
+  console.log(
+    `  ✅ ${DAILY_DAYS} days × ${GAME_TYPES.length} games = ${DAILY_DAYS * GAME_TYPES.length} daily puzzle assignments`
+  );
 }
 
 async function main(): Promise<void> {
   console.log('🌱 Starting Puzzle Roll seed...\n');
 
-  // Clear existing data
   console.log('🧹 Clearing existing puzzle data...');
   await prisma.gameCompletion.deleteMany();
   await prisma.dailyPuzzle.deleteMany();

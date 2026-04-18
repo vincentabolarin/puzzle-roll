@@ -4,28 +4,28 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class RegisterDto {
   @ApiProperty({ example: 'user@example.com' })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiProperty({ example: 'securePassword123', minLength: 8 })
   @IsString()
   @MinLength(8)
-  password: string;
+  password!: string;
 }
 
 export class LoginDto {
   @ApiProperty({ example: 'user@example.com' })
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiProperty({ example: 'securePassword123' })
   @IsString()
-  password: string;
+  password!: string;
 }
 
 export class RefreshTokenDto {
   @ApiProperty()
   @IsString()
-  refreshToken: string;
+  refreshToken!: string;
 }
 
 export class AnonymousSessionDto {
@@ -38,24 +38,24 @@ export class AnonymousSessionDto {
 export class UpgradeAccountDto {
   @ApiProperty()
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiProperty({ minLength: 8 })
   @IsString()
   @MinLength(8)
-  password: string;
+  password!: string;
 }
 
 export class AuthResponseDto {
   @ApiProperty()
-  accessToken: string;
+  accessToken!: string;
 
   @ApiProperty()
-  refreshToken: string;
+  refreshToken!: string;
 
   @ApiProperty()
-  userId: string;
+  userId!: string;
 
   @ApiProperty()
-  isAnonymous: boolean;
+  isAnonymous!: boolean;
 }

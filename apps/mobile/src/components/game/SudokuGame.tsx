@@ -149,17 +149,30 @@ export default function SudokuGame({ puzzleId, puzzleData, solution: _solution, 
 
   // Initialize session
   useEffect(() => {
-    const pd = puzzleData as SudokuEngine.SudokuPuzzleData;
-    const board = buildInitialBoard(pd.grid);
-    startSession({
-      puzzleId,
-      gameType: GameType.SUDOKU,
-      difficulty: Difficulty.MEDIUM,
-      isDaily,
-      dailyPuzzleId,
-      initialState: { board, selectedCell: null, isNotesMode: false } satisfies SudokuEngine.SudokuGameState,
-    });
-  }, [puzzleId]);
+  if (!puzzleData) return;
+
+  const pd = puzzleData as SudokuEngine.SudokuPuzzleData;
+
+  if (!pd?.grid) {
+    console.error('Invalid puzzleData:', puzzleData);
+    return;
+  }
+
+  const board = buildInitialBoard(pd.grid);
+
+  startSession({
+    puzzleId,
+    gameType: GameType.SUDOKU,
+    difficulty: Difficulty.MEDIUM,
+    isDaily,
+    dailyPuzzleId,
+    initialState: {
+      board,
+      selectedCell: null,
+      isNotesMode: false,
+    },
+  });
+}, [puzzleId, puzzleData]);
 
   const gameState = session?.currentState as SudokuEngine.SudokuGameState | undefined;
   const board = gameState?.board;
@@ -191,6 +204,7 @@ export default function SudokuGame({ puzzleId, puzzleData, solution: _solution, 
         dailyPuzzleId,
         ...variables,
         shareableResult: variables.shareableResult,
+        completedAt: ''
       });
     },
   });
@@ -264,7 +278,7 @@ export default function SudokuGame({ puzzleId, puzzleData, solution: _solution, 
       await puzzleCache.markCompleted(puzzleId, GameType.SUDOKU);
       await showInterstitialIfDue();
     }
-  }, [gameState, selectedCell, session, isNotesMode, autoRemoveNotes, lightImpact, updateState, loadSolution, markSolved, successNotification]);
+  }, [gameState, selectedCell, session, isNotesMode, autoRemoveNotes, lightImpact, updateState, loadSolution, markSolved, successNotification, completionScale, submitCompletion, showInterstitialIfDue, puzzleId]);
 
   const handleHintPress = useCallback(async () => {
     if (!gameState) return;

@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/kakuro';
+export { generateKakuro } from '@puzzle-roll/shared';

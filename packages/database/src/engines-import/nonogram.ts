@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/nonogram';
+export { generateNonogram } from '@puzzle-roll/shared';
