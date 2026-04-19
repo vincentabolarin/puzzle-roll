@@ -2,54 +2,51 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { Tabs, router, usePathname } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useBreakpoint } from '../../src/hooks/useBreakpoint';
-import { useAuthStore } from '../../src/stores/auth.store';
 
 const TAB_ITEMS = [
-  { name: 'index', label: 'Home', icon: '🎮' },
-  { name: 'leaderboard', label: 'Ranks', icon: '🏆' },
-  { name: 'profile', label: 'Profile', icon: '👤' },
+  { name: 'index',       label: 'Home',     icon: '🎮' },
+  { name: 'leaderboard', label: 'Ranks',    icon: '🏆' },
+  { name: 'profile',     label: 'Profile',  icon: '👤' },
+  { name: 'settings',    label: 'Settings', icon: '⚙️' },
 ] as const;
 
 function SidebarNavigator() {
   const pathname = usePathname();
 
   return (
-    <View className="flex-row flex-1">
-      {/* Sidebar */}
-      <View className="w-56 bg-surface border-r border-border-subtle pt-4">
-        <View className="px-4 mb-8">
-          <Text className="text-text-primary font-sans-bold text-2xl">Puzzle Roll</Text>
+    <View style={{ flexDirection: 'row', flex: 1 }}>
+      <View style={{ width: 220, backgroundColor: '#111827', borderRightWidth: 1, borderRightColor: '#1f2937', paddingTop: 16 }}>
+        <View style={{ paddingHorizontal: 16, marginBottom: 32 }}>
+          <Text style={{ color: '#f9fafb', fontFamily: 'SpaceGrotesk-Bold', fontSize: 22 }}>Puzzle Roll</Text>
         </View>
         {TAB_ITEMS.map((item) => {
           const isActive = pathname === `/${item.name}` || (item.name === 'index' && pathname === '/');
           return (
             <TouchableOpacity
               key={item.name}
-              onPress={() => router.push(item.name === 'index' ? '/' : `/${item.name}`)}
-              className={`flex-row items-center gap-3 mx-2 px-4 py-3 rounded-xl mb-1 ${
-                isActive ? 'bg-surface-2' : ''
-              }`}
+              onPress={() => router.push(item.name === 'index' ? '/' : `/${item.name}` as never)}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 12,
+                marginHorizontal: 8, paddingHorizontal: 16, paddingVertical: 12,
+                borderRadius: 12, marginBottom: 4,
+                backgroundColor: isActive ? '#1f2937' : 'transparent',
+              }}
               accessibilityLabel={item.label}
               accessibilityRole="menuitem"
             >
-              <Text className="text-xl">{item.icon}</Text>
-              <Text
-                className={`font-sans-medium text-base ${
-                  isActive ? 'text-text-primary' : 'text-text-secondary'
-                }`}
-              >
+              <Text style={{ fontSize: 18 }}>{item.icon}</Text>
+              <Text style={{
+                fontFamily: 'SpaceGrotesk-Medium', fontSize: 15,
+                color: isActive ? '#f9fafb' : '#9ca3af',
+              }}>
                 {item.label}
               </Text>
             </TouchableOpacity>
           );
         })}
       </View>
-
-      {/* Main content */}
-      <View className="flex-1">
-        <Tabs
-          screenOptions={{ headerShown: false, tabBarStyle: { display: 'none' } }}
-        />
+      <View style={{ flex: 1 }}>
+        <Tabs screenOptions={{ headerShown: false, tabBarStyle: { display: 'none' } }} />
       </View>
     </View>
   );
@@ -62,9 +59,10 @@ function BottomTabBar() {
         headerShown: false,
         tabBarStyle: {
           backgroundColor: '#111827',
-          borderTopColor: '#374151',
+          borderTopColor: '#1f2937',
           borderTopWidth: 1,
-          paddingBottom: 4,
+          height: 60,
+          paddingBottom: 8,
         },
         tabBarActiveTintColor: '#6366f1',
         tabBarInactiveTintColor: '#6b7280',
@@ -78,9 +76,7 @@ function BottomTabBar() {
           options={{
             title: item.label,
             tabBarIcon: ({ focused }) => (
-              <Text className={`text-xl ${focused ? 'opacity-100' : 'opacity-50'}`}>
-                {item.icon}
-              </Text>
+              <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{item.icon}</Text>
             ),
           }}
         />
@@ -94,7 +90,7 @@ export default function TabsLayout() {
 
   if (isTablet) {
     return (
-      <SafeAreaView className="flex-1 bg-navy-950" edges={['top']}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#060818' }} edges={['top']}>
         <SidebarNavigator />
       </SafeAreaView>
     );

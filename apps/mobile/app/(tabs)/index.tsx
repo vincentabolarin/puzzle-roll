@@ -1,30 +1,24 @@
-import { View, Text, ScrollView, TouchableOpacity, FlatList } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { GameType, Difficulty } from '@puzzle-roll/shared';
+import { GameType } from '@puzzle-roll/shared';
 import { useBreakpoint } from '../../src/hooks/useBreakpoint';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { queryKeys } from '../../src/lib/query-client';
 import { apiClient } from '../../src/lib/api-client';
 
-const GAME_CONFIGS: Array<{
-  type: GameType;
-  name: string;
-  description: string;
-  accent: string;
-  emoji: string;
-}> = [
-  { type: GameType.SUDOKU, name: 'Sudoku', description: 'Fill the 9×9 grid', accent: '#6366f1', emoji: '🔢' },
-  { type: GameType.QUEENS, name: 'Queens', description: 'Place queens safely', accent: '#ec4899', emoji: '👑' },
-  { type: GameType.ZIP, name: 'Zip', description: 'Connect every cell', accent: '#f59e0b', emoji: '🔗' },
-  { type: GameType.TANGO, name: 'Tango', description: 'Balance sun & moon', accent: '#f97316', emoji: '☯️' },
-  { type: GameType.NONOGRAM, name: 'Nonogram', description: 'Reveal the picture', accent: '#14b8a6', emoji: '🖼️' },
-  { type: GameType.MINESWEEPER, name: 'Minesweeper', description: 'Avoid the mines', accent: '#ef4444', emoji: '💣' },
-  { type: GameType.KAKURO, name: 'Kakuro', description: 'Sum the runs', accent: '#a855f7', emoji: '➕' },
-  { type: GameType.LIGHT_UP, name: 'Light Up', description: 'Illuminate every cell', accent: '#eab308', emoji: '💡' },
-  { type: GameType.FUTOSHIKI, name: 'Futoshiki', description: 'Satisfy inequalities', accent: '#22c55e', emoji: '⚖️' },
-  { type: GameType.HITORI, name: 'Hitori', description: 'Shade to clear repeats', accent: '#64748b', emoji: '⬛' },
+const GAME_CONFIGS = [
+  { type: GameType.SUDOKU,      name: 'Sudoku',      description: 'Fill the 9×9 grid',       accent: '#6366f1', emoji: '🔢' },
+  { type: GameType.QUEENS,      name: 'Queens',      description: 'Place queens safely',      accent: '#ec4899', emoji: '👑' },
+  { type: GameType.ZIP,         name: 'Zip',         description: 'Connect every cell',       accent: '#f59e0b', emoji: '🔗' },
+  { type: GameType.TANGO,       name: 'Tango',       description: 'Balance sun & moon',       accent: '#f97316', emoji: '☯️' },
+  { type: GameType.NONOGRAM,    name: 'Nonogram',    description: 'Reveal the picture',       accent: '#14b8a6', emoji: '🖼️' },
+  { type: GameType.MINESWEEPER, name: 'Minesweeper', description: 'Avoid the mines',          accent: '#ef4444', emoji: '💣' },
+  { type: GameType.KAKURO,      name: 'Kakuro',      description: 'Sum the runs',             accent: '#a855f7', emoji: '➕' },
+  { type: GameType.LIGHT_UP,    name: 'Light Up',    description: 'Illuminate every cell',    accent: '#eab308', emoji: '💡' },
+  { type: GameType.FUTOSHIKI,   name: 'Futoshiki',   description: 'Satisfy inequalities',     accent: '#22c55e', emoji: '⚖️' },
+  { type: GameType.HITORI,      name: 'Hitori',      description: 'Shade to clear repeats',   accent: '#64748b', emoji: '⬛' },
 ];
 
 interface GameCardProps {
@@ -38,31 +32,31 @@ function GameCard({ game, bestTime, dailyPlayed }: GameCardProps) {
 
   return (
     <TouchableOpacity
-      onPress={() => router.push(`/game/${game.type}`)}
-      className="bg-surface rounded-2xl p-4 mb-3 border border-border-subtle"
+      onPress={() => router.push(`/game/${game.type}` as never)}
+      style={[styles.card, { borderLeftColor: game.accent }]}
       accessibilityLabel={`${game.name} puzzle game`}
       accessibilityRole="button"
-      style={{ borderLeftWidth: 3, borderLeftColor: game.accent }}
     >
-      <View className="flex-row items-center justify-between mb-2">
-        <View className="flex-row items-center gap-2">
-          <Text className="text-2xl">{game.emoji}</Text>
-          <Text className="text-text-primary font-sans-bold text-base">{game.name}</Text>
+      {/* Top row: emoji + game name */}
+      <View style={styles.cardTopRow}>
+        <Text style={styles.cardEmoji}>{game.emoji}</Text>
+        <Text style={styles.cardName}>{game.name}</Text>
+      </View>
+
+      {/* Description */}
+      <Text style={styles.cardDesc}>{game.description}</Text>
+
+      {/* Bottom row: daily badge + best time */}
+      <View style={styles.cardBottomRow}>
+        <View style={[styles.dailyBadge, dailyPlayed && styles.dailyBadgeDone]}>
+          <Text style={[styles.dailyBadgeText, dailyPlayed && styles.dailyBadgeTextDone]}>
+            {dailyPlayed ? '✓ Daily done' : '● Daily live'}
+          </Text>
         </View>
-        {dailyPlayed ? (
-          <View className="bg-green-900/40 px-2 py-0.5 rounded-full">
-            <Text className="text-green-400 font-sans text-xs">✓ Daily done</Text>
-          </View>
-        ) : (
-          <View className="bg-surface-2 px-2 py-0.5 rounded-full">
-            <Text className="text-text-secondary font-sans text-xs">Daily live</Text>
-          </View>
+        {bestTime !== null && (
+          <Text style={styles.bestTime}>Best {formatTime(bestTime)}</Text>
         )}
       </View>
-      <Text className="text-text-secondary font-sans text-sm">{game.description}</Text>
-      {bestTime !== null && (
-        <Text className="text-muted font-mono text-xs mt-1">Best: {formatTime(bestTime)}</Text>
-      )}
     </TouchableOpacity>
   );
 }
@@ -78,34 +72,23 @@ export default function HomeScreen() {
   });
 
   const statsMap = new Map(stats?.map((s) => [s.gameType, s]) ?? []);
+  const colWidth = columns === 3 ? '31%' : '47%';
 
   return (
-    <SafeAreaView className="flex-1 bg-navy-950" edges={['top']}>
+    <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
-        className="flex-1"
-        contentContainerClassName="px-4 pt-4 pb-24"
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View className="mb-6">
-          <Text className="text-text-primary font-sans-bold text-3xl">Puzzle Roll</Text>
-          <Text className="text-text-secondary font-sans text-sm mt-1">
-            10 daily logic puzzles
-          </Text>
-        </View>
+        <Text style={styles.appTitle}>Puzzle Roll</Text>
+        <Text style={styles.appSubtitle}>10 daily logic puzzles</Text>
 
-        {/* Game grid */}
-        <View
-          className="flex-row flex-wrap"
-          style={{ gap: 12 }}
-        >
+        <View style={styles.grid}>
           {GAME_CONFIGS.map((game) => {
             const stat = statsMap.get(game.type);
             return (
-              <View
-                key={game.type}
-                style={{ width: columns === 3 ? '31%' : '47%' }}
-              >
+              <View key={game.type} style={{ width: colWidth }}>
                 <GameCard
                   game={game}
                   bestTime={stat?.bestTime ?? null}
@@ -119,3 +102,32 @@ export default function HomeScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#060818' },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 96 },
+  appTitle: { color: '#f9fafb', fontFamily: 'SpaceGrotesk-Bold', fontSize: 32, marginBottom: 4 },
+  appSubtitle: { color: '#6b7280', fontFamily: 'SpaceGrotesk-Regular', fontSize: 14, marginBottom: 20 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  card: {
+    backgroundColor: '#111827',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    borderLeftWidth: 4,
+    minHeight: 130,
+    justifyContent: 'space-between',
+  },
+  cardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  cardEmoji: { fontSize: 24 },
+  cardName: { color: '#f9fafb', fontFamily: 'SpaceGrotesk-Bold', fontSize: 17, flexShrink: 1 },
+  cardDesc: { color: '#9ca3af', fontFamily: 'SpaceGrotesk-Regular', fontSize: 12, marginBottom: 12, lineHeight: 17 },
+  cardBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 },
+  dailyBadge: { backgroundColor: '#1f2937', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
+  dailyBadgeDone: { backgroundColor: '#052e16' },
+  dailyBadgeText: { color: '#9ca3af', fontFamily: 'SpaceGrotesk-Medium', fontSize: 10 },
+  dailyBadgeTextDone: { color: '#4ade80' },
+  bestTime: { color: '#6b7280', fontFamily: 'JetBrainsMono-Regular', fontSize: 10 },
+});

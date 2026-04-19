@@ -20,7 +20,7 @@ export type { QueensBoard, QueensCellState, QueensGameState, QueensGeneratedPuzz
 export { generatePuzzle as generateSudoku } from './engines/sudoku';
 export { generatePuzzle as generateQueens } from './engines/queens';
 export { generatePuzzle as generateZip } from './engines/zip';
-export { generatePuzzle as generateTango } from './engines/tango';
+export { generatePuzzle as generateTango, TangoSymbol, TangoConstraint, TangoPuzzleData, TangoSolution, isTangoSolved, validateTangoBoard, getHint, cycleTangoSymbol } from './engines/tango';
 export { generatePuzzle as generateNonogram } from './engines/nonogram';
 export { generatePuzzle as generateMinesweeper } from './engines/minesweeper';
 export { generatePuzzle as generateKakuro } from './engines/kakuro';

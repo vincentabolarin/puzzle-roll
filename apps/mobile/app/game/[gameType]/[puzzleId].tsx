@@ -9,9 +9,11 @@ import { queryKeys } from '@/lib/query-client';
 import { puzzleCache } from '@/services/puzzle-cache.service';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import SudokuGame from '@/components/game/SudokuGame';
+import TangoGame from '@/components/game/TangoGame';
 
 const GAME_COMPONENTS: Partial<Record<GameType, React.ComponentType<{ puzzleId: string; puzzleData: unknown; solution: unknown; isDaily: boolean; dailyPuzzleId: string | null }>>> = {
   [GameType.SUDOKU]: SudokuGame,
+  [GameType.TANGO]: TangoGame
 };
 
 function GameErrorFallback({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) {
