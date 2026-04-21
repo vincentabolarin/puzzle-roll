@@ -1,14 +1,8 @@
-import { View, Text, TouchableOpacity, Share, Modal } from 'react-native';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withDelay,
-  withTiming,
-  runOnJS,
-} from 'react-native-reanimated';
+import { View, Text, TouchableOpacity, Share, Modal, StyleSheet } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withDelay, withTiming } from 'react-native-reanimated';
 import { useEffect } from 'react';
 import { GameType } from '@puzzle-roll/shared';
+import { useAppTheme } from '../../hooks/useAppTheme';
 
 interface CompletionModalProps {
   gameType: GameType;
@@ -24,32 +18,19 @@ function formatTime(s: number): string {
 }
 
 const GAME_LABELS: Partial<Record<GameType, string>> = {
-  [GameType.SUDOKU]: 'Sudoku',
-  [GameType.QUEENS]: 'Queens',
-  [GameType.ZIP]: 'Zip',
-  [GameType.TANGO]: 'Tango',
-  [GameType.NONOGRAM]: 'Nonogram',
-  [GameType.MINESWEEPER]: 'Minesweeper',
-  [GameType.KAKURO]: 'Kakuro',
-  [GameType.LIGHT_UP]: 'Light Up',
-  [GameType.FUTOSHIKI]: 'Futoshiki',
-  [GameType.HITORI]: 'Hitori',
+  [GameType.SUDOKU]: 'Sudoku', [GameType.QUEENS]: 'Queens', [GameType.ZIP]: 'Zip',
+  [GameType.TANGO]: 'Tango', [GameType.NONOGRAM]: 'Nonogram',
+  [GameType.MINESWEEPER]: 'Minesweeper', [GameType.KAKURO]: 'Kakuro',
+  [GameType.LIGHT_UP]: 'Light Up', [GameType.FUTOSHIKI]: 'Futoshiki', [GameType.HITORI]: 'Hitori',
 };
 
-export default function CompletionModal({
-  gameType,
-  elapsedSeconds,
-  hintsUsed,
-  isDaily,
-  shareableResult,
-  onClose,
-}: CompletionModalProps) {
+export default function CompletionModal({ gameType, elapsedSeconds, hintsUsed, isDaily, shareableResult, onClose }: CompletionModalProps) {
+  const t = useAppTheme();
   const scale = useSharedValue(0.8);
   const opacity = useSharedValue(0);
 
   const containerStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    opacity: opacity.value,
+    transform: [{ scale: scale.value }], opacity: opacity.value,
   }));
 
   useEffect(() => {
@@ -58,75 +39,50 @@ export default function CompletionModal({
   }, []);
 
   const handleShare = async () => {
-    try {
-      await Share.share({ message: shareableResult });
-    } catch {
-      // User cancelled or share failed — silent
-    }
+    try { await Share.share({ message: shareableResult }); } catch {}
   };
 
   return (
     <Modal transparent animationType="fade" visible statusBarTranslucent>
-      <View className="flex-1 bg-black/70 items-center justify-center px-6">
-        <Animated.View
-          style={containerStyle}
-          className="bg-surface rounded-3xl p-8 w-full border border-border-subtle"
-        >
-          {/* Header */}
-          <View className="items-center mb-6">
-            <Text className="text-5xl mb-3">🎉</Text>
-            <Text className="text-text-primary font-sans-bold text-2xl">
+      <View style={styles.overlay}>
+        <Animated.View style={[styles.card, containerStyle, { backgroundColor: t.surface, borderColor: t.borderSubtle }]}>
+          <View style={styles.header}>
+            <Text style={styles.emoji}>🎉</Text>
+            <Text style={[styles.title, { color: t.textPrimary }]}>
               {isDaily ? 'Daily complete!' : 'Puzzle solved!'}
             </Text>
-            <Text className="text-text-secondary font-sans text-sm mt-1">
-              {GAME_LABELS[gameType]}
-            </Text>
+            <Text style={[styles.subtitle, { color: t.textSecondary }]}>{GAME_LABELS[gameType]}</Text>
           </View>
 
-          {/* Stats */}
-          <View className="flex-row gap-4 mb-6">
-            <View className="flex-1 bg-surface-2 rounded-2xl p-4 items-center">
-              <Text className="text-text-secondary font-sans text-xs mb-1">Time</Text>
-              <Text className="text-text-primary font-mono text-xl font-bold">
-                {formatTime(elapsedSeconds)}
-              </Text>
+          <View style={styles.statsRow}>
+            <View style={[styles.statBox, { backgroundColor: t.surface2 }]}>
+              <Text style={[styles.statLabel, { color: t.textSecondary }]}>Time</Text>
+              <Text style={[styles.statValue, { color: t.textPrimary }]}>{formatTime(elapsedSeconds)}</Text>
             </View>
-            <View className="flex-1 bg-surface-2 rounded-2xl p-4 items-center">
-              <Text className="text-text-secondary font-sans text-xs mb-1">Hints</Text>
-              <Text className="text-text-primary font-mono text-xl font-bold">
-                {hintsUsed === 0 ? '—' : hintsUsed}
-              </Text>
+            <View style={[styles.statBox, { backgroundColor: t.surface2 }]}>
+              <Text style={[styles.statLabel, { color: t.textSecondary }]}>Hints</Text>
+              <Text style={[styles.statValue, { color: t.textPrimary }]}>{hintsUsed === 0 ? '—' : hintsUsed}</Text>
             </View>
           </View>
 
-          {/* Shareable preview */}
           {isDaily && (
-            <View className="bg-navy-900 rounded-2xl p-4 mb-6">
-              <Text className="text-text-secondary font-mono text-xs leading-5">
-                {shareableResult}
-              </Text>
+            <View style={[styles.sharePreview, { backgroundColor: t.surface2 }]}>
+              <Text style={[styles.shareText, { color: t.textSecondary }]}>{shareableResult}</Text>
             </View>
           )}
 
-          {/* Actions */}
-          <View className="gap-3">
+          <View style={styles.actions}>
             {isDaily && (
-              <TouchableOpacity
-                onPress={handleShare}
-                className="bg-game-sudoku rounded-2xl py-4 items-center"
-                accessibilityLabel="Share your result"
-                accessibilityRole="button"
-              >
-                <Text className="text-white font-sans-bold text-base">Share result</Text>
+              <TouchableOpacity onPress={handleShare} style={styles.primaryBtn} accessibilityLabel="Share result">
+                <Text style={styles.primaryBtnText}>Share result</Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity
               onPress={onClose}
-              className="bg-surface-2 rounded-2xl py-4 items-center border border-border"
-              accessibilityLabel="Back to game menu"
-              accessibilityRole="button"
+              style={[styles.secondaryBtn, { backgroundColor: t.surface2, borderColor: t.border }]}
+              accessibilityLabel="Back to menu"
             >
-              <Text className="text-text-primary font-sans-medium text-base">Back to menu</Text>
+              <Text style={[styles.secondaryBtnText, { color: t.textPrimary }]}>Back to menu</Text>
             </TouchableOpacity>
           </View>
         </Animated.View>
@@ -134,3 +90,23 @@ export default function CompletionModal({
     </Modal>
   );
 }
+
+const styles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  card: { width: '100%', borderRadius: 28, padding: 28, borderWidth: 1 },
+  header: { alignItems: 'center', marginBottom: 20 },
+  emoji: { fontSize: 52, marginBottom: 10 },
+  title: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 24, marginBottom: 4 },
+  subtitle: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 14 },
+  statsRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  statBox: { flex: 1, borderRadius: 16, padding: 16, alignItems: 'center' },
+  statLabel: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 4 },
+  statValue: { fontFamily: 'JetBrainsMono-Regular', fontSize: 22 },
+  sharePreview: { borderRadius: 12, padding: 14, marginBottom: 20 },
+  shareText: { fontFamily: 'JetBrainsMono-Regular', fontSize: 12, lineHeight: 18 },
+  actions: { gap: 10 },
+  primaryBtn: { backgroundColor: '#6366f1', borderRadius: 16, paddingVertical: 15, alignItems: 'center' },
+  primaryBtnText: { color: '#fff', fontFamily: 'SpaceGrotesk-Bold', fontSize: 16 },
+  secondaryBtn: { borderRadius: 16, paddingVertical: 15, alignItems: 'center', borderWidth: 1 },
+  secondaryBtnText: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 16 },
+});

@@ -10,10 +10,20 @@ import { puzzleCache } from '@/services/puzzle-cache.service';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import SudokuGame from '@/components/game/SudokuGame';
 import TangoGame from '@/components/game/TangoGame';
+import QueensGame from '@/components/game/QueensGame';
+import ZipGame from '@/components/game/ZipGame';
+import NonogramGame from '@/components/game/NonogramGame';
+import MinesweeperGame from '@/components/game/MinesweeperGame';
+import KakuroGame from '@/components/game/KakuroGame';
 
 const GAME_COMPONENTS: Partial<Record<GameType, React.ComponentType<{ puzzleId: string; puzzleData: unknown; solution: unknown; isDaily: boolean; dailyPuzzleId: string | null }>>> = {
   [GameType.SUDOKU]: SudokuGame,
-  [GameType.TANGO]: TangoGame
+  [GameType.TANGO]: TangoGame,
+  [GameType.QUEENS]: QueensGame,
+  [GameType.ZIP]: ZipGame,
+  [GameType.NONOGRAM]: NonogramGame,
+  [GameType.MINESWEEPER]: MinesweeperGame,
+  [GameType.KAKURO]: KakuroGame
 };
 
 function GameErrorFallback({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) {

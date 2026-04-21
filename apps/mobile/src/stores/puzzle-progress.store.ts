@@ -2,8 +2,8 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
 
-const PROGRESS_KEY_PREFIX = 'puzzle_roll_progress_';
-const COMPLETED_KEY = 'puzzle_roll_completed';
+const PROGRESS_KEY_PREFIX = 'proll_progress_';
+const COMPLETED_KEY = 'proll_completed';
 
 export interface SavedPuzzleProgress {
   puzzleId: string;
@@ -30,8 +30,6 @@ interface PuzzleProgressActions {
   markCompleted: (puzzleId: string) => Promise<void>;
   isCompleted: (puzzleId: string) => boolean;
   isInProgress: (puzzleId: string) => boolean;
-  hydrateCompletedList: (puzzleIds: string[]) => void;
-  hydrateInProgressList: (puzzleIds: string[]) => void;
 }
 
 export const usePuzzleProgressStore = create<PuzzleProgressState & PuzzleProgressActions>(
@@ -48,10 +46,9 @@ export const usePuzzleProgressStore = create<PuzzleProgressState & PuzzleProgres
     },
 
     loadProgress: async (puzzleId) => {
-      const key = `${PROGRESS_KEY_PREFIX}${puzzleId}`;
-      const raw = await AsyncStorage.getItem(key);
-      if (!raw) return null;
       try {
+        const raw = await AsyncStorage.getItem(`${PROGRESS_KEY_PREFIX}${puzzleId}`);
+        if (!raw) return null;
         return JSON.parse(raw) as SavedPuzzleProgress;
       } catch {
         return null;
@@ -59,8 +56,7 @@ export const usePuzzleProgressStore = create<PuzzleProgressState & PuzzleProgres
     },
 
     clearProgress: async (puzzleId) => {
-      const key = `${PROGRESS_KEY_PREFIX}${puzzleId}`;
-      await AsyncStorage.removeItem(key);
+      await AsyncStorage.removeItem(`${PROGRESS_KEY_PREFIX}${puzzleId}`);
       set((s) => {
         const next = new Set(s.inProgressPuzzleIds);
         next.delete(puzzleId);
@@ -69,51 +65,38 @@ export const usePuzzleProgressStore = create<PuzzleProgressState & PuzzleProgres
     },
 
     markCompleted: async (puzzleId) => {
-      // Clear in-progress state
       await AsyncStorage.removeItem(`${PROGRESS_KEY_PREFIX}${puzzleId}`);
-
-      // Add to completed set and persist
       const { completedPuzzleIds } = get();
       const updated = new Set([...completedPuzzleIds, puzzleId]);
-      await AsyncStorage.setItem(COMPLETED_KEY, JSON.stringify([...updated]));
-
+      try {
+        await AsyncStorage.setItem(COMPLETED_KEY, JSON.stringify([...updated]));
+      } catch {}
       set((s) => {
         const inProg = new Set(s.inProgressPuzzleIds);
         inProg.delete(puzzleId);
-        return {
-          completedPuzzleIds: updated,
-          inProgressPuzzleIds: inProg,
-        };
+        return { completedPuzzleIds: updated, inProgressPuzzleIds: inProg };
       });
     },
 
     isCompleted: (puzzleId) => get().completedPuzzleIds.has(puzzleId),
-    isInProgress: (puzzleId) => get().inProgressPuzzleIds.has(puzzleId),
-
-    hydrateCompletedList: (puzzleIds) => {
-      set({ completedPuzzleIds: new Set(puzzleIds) });
-    },
-
-    hydrateInProgressList: (puzzleIds) => {
-      set({ inProgressPuzzleIds: new Set(puzzleIds) });
-    },
+    isInProgress: (puzzleId) =>
+      !get().completedPuzzleIds.has(puzzleId) && get().inProgressPuzzleIds.has(puzzleId),
   })
 );
 
-/** Call once on app startup to load completed + in-progress puzzle IDs */
 export async function hydratePuzzleProgress(): Promise<void> {
   try {
-    const completedRaw = await AsyncStorage.getItem(COMPLETED_KEY);
+    const [completedRaw, allKeys] = await Promise.all([
+      AsyncStorage.getItem(COMPLETED_KEY),
+      AsyncStorage.getAllKeys(),
+    ]);
     const completedIds: string[] = completedRaw ? JSON.parse(completedRaw) : [];
-
-    // Scan AsyncStorage for in-progress keys
-    const allKeys = await AsyncStorage.getAllKeys();
-    const progressKeys = allKeys.filter((k) => k.startsWith(PROGRESS_KEY_PREFIX));
-    const inProgressIds = progressKeys.map((k) => k.replace(PROGRESS_KEY_PREFIX, ''));
-
-    usePuzzleProgressStore.getState().hydrateCompletedList(completedIds);
-    usePuzzleProgressStore.getState().hydrateInProgressList(inProgressIds);
-  } catch {
-    // Non-fatal — app continues without progress state
-  }
+    const inProgressIds = (allKeys ?? [])
+      .filter((k) => k.startsWith(PROGRESS_KEY_PREFIX))
+      .map((k) => k.replace(PROGRESS_KEY_PREFIX, ''));
+    usePuzzleProgressStore.setState({
+      completedPuzzleIds: new Set(completedIds),
+      inProgressPuzzleIds: new Set(inProgressIds),
+    });
+  } catch {}
 }

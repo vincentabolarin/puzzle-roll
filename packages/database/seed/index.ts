@@ -5,197 +5,133 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 import { PrismaClient, GameType, Difficulty } from '../prisma/generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { SudokuEngine , generateQueens , generateZip , generateTango, generateNonogram, generateMinesweeper, generateKakuro, generateLightUp, generateFutoshiki, generateHitori } from '@puzzle-roll/shared';
+import {
+  SudokuEngine, generateQueens, generateZip, generateTango,
+  generateNonogram, generateMinesweeper, generateKakuro,
+  generateLightUp, generateFutoshiki, generateHitori,
+} from '@puzzle-roll/shared';
 import { SqlDriverAdapterFactory } from '@prisma/client/runtime/client';
 
-// const connectionString = process.env.DATABASE_URL;
-// if (!connectionString) throw new Error('DATABASE_URL is not set. Check your .env file.');
-
-// Load the root .env before anything else.
-console.log('env file path', path.resolve(__dirname, '../.env'))
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
-
-// DATABASE_URL is now available in process.env
 const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString) {
-  throw new Error(
-    '[prisma.config.ts] DATABASE_URL is not set. ' +
-    'Ensure a .env file exists at the specified path with DATABASE_URL defined.'
-  );
-}
+if (!connectionString) throw new Error('[seed] DATABASE_URL is not set.');
 
 const adapter: SqlDriverAdapterFactory = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
-const PUZZLES_PER_DIFFICULTY = 20;
+const PUZZLES_PER_DIFFICULTY = 10;
 const DAILY_DAYS = 365;
+const PUZZLE_TIMEOUT_MS = 30_000;
 
 const GAME_TYPES: GameType[] = [
-  'sudoku', 'queens', 'zip', 'tango', 'nonogram',
-  'minesweeper', 'kakuro', 'light_up', 'futoshiki', 'hitori',
+  'sudoku','queens','zip','tango','nonogram',
+  'minesweeper','kakuro','light_up','futoshiki','hitori',
 ];
+const DIFFICULTIES: Difficulty[] = ['easy','medium','hard','expert'];
 
-const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard', 'expert'];
-
-type GeneratorFn = (difficulty: string, seed: number) => { puzzleData: unknown; solution: unknown; seed: number };
-
-const GENERATORS: Record<GameType, GeneratorFn> = {
-  sudoku: (d, s) => SudokuEngine.generatePuzzle(d as Parameters<typeof SudokuEngine.generatePuzzle>[0], s),
-  queens: (d, s) => generateQueens(d as Parameters<typeof generateQueens>[0], s),
-  zip: (d, s) => generateZip(d as Parameters<typeof generateZip>[0], s),
-  tango: (d, s) => generateTango(d as Parameters<typeof generateTango>[0], s),
-  nonogram: (d, s) => generateNonogram(d as Parameters<typeof generateNonogram>[0], s),
-  minesweeper: (d, s) => generateMinesweeper(d as Parameters<typeof generateMinesweeper>[0], s),
-  kakuro: (d, s) => generateKakuro(d as Parameters<typeof generateKakuro>[0], s),
-  light_up: (d, s) => generateLightUp(d as Parameters<typeof generateLightUp>[0], s),
-  futoshiki: (d, s) => generateFutoshiki(d as Parameters<typeof generateFutoshiki>[0], s),
-  hitori: (d, s) => generateHitori(d as Parameters<typeof generateHitori>[0], s),
+type GenFn = (d: string, s: number) => { puzzleData: unknown; solution: unknown; seed: number };
+const GENERATORS: Record<GameType, GenFn> = {
+  sudoku:      (d,s)=>SudokuEngine.generatePuzzle(d as Parameters<typeof SudokuEngine.generatePuzzle>[0],s),
+  queens:      (d,s)=>generateQueens(d as Parameters<typeof generateQueens>[0],s),
+  zip:         (d,s)=>generateZip(d as Parameters<typeof generateZip>[0],s),
+  tango:       (d,s)=>generateTango(d as Parameters<typeof generateTango>[0],s),
+  nonogram:    (d,s)=>generateNonogram(d as Parameters<typeof generateNonogram>[0],s),
+  minesweeper: (d,s)=>generateMinesweeper(d as Parameters<typeof generateMinesweeper>[0],s),
+  kakuro:      (d,s)=>generateKakuro(d as Parameters<typeof generateKakuro>[0],s),
+  light_up:    (d,s)=>generateLightUp(d as Parameters<typeof generateLightUp>[0],s),
+  futoshiki:   (d,s)=>generateFutoshiki(d as Parameters<typeof generateFutoshiki>[0],s),
+  hitori:      (d,s)=>generateHitori(d as Parameters<typeof generateHitori>[0],s),
 };
 
-function toISODate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+async function tryGenerate(gameType: GameType, difficulty: string, seed: number) {
+  return new Promise<{ puzzleData: unknown; solution: unknown; seed: number } | null>((resolve) => {
+    const t = setTimeout(() => { console.warn(`    ⏱  Timeout: ${gameType} ${difficulty}`); resolve(null); }, PUZZLE_TIMEOUT_MS);
+    try { const r = GENERATORS[gameType](difficulty, seed); clearTimeout(t); resolve(r); }
+    catch (e) { clearTimeout(t); console.error(`    ⚠️  ${e instanceof Error ? e.message : e}`); resolve(null); }
+  });
 }
 
+function toISO(date: Date) { return date.toISOString().slice(0,10); }
+
 async function seedPuzzles(): Promise<Map<string, string[]>> {
-  console.log('🎲 Generating puzzles...');
-  const puzzleIdMap = new Map<string, string[]>();
+  console.log('🎲 Generating puzzles...\n');
+  const map = new Map<string, string[]>();
 
   for (const gameType of GAME_TYPES) {
     for (const difficulty of DIFFICULTIES) {
       const key = `${gameType}:${difficulty}`;
-      const batch: {
-        gameType: GameType;
-        difficulty: Difficulty;
-        puzzleData: object;
-        solution: object;
-        seed: number;
-      }[] = [];
-
-      console.log(`  Generating ${PUZZLES_PER_DIFFICULTY} ${difficulty} ${gameType} puzzles...`);
+      console.log(`  ▶ ${key}`);
+      const batch: { gameType: GameType; difficulty: Difficulty; puzzleData: object; solution: object; seed: number }[] = [];
 
       for (let i = 0; i < PUZZLES_PER_DIFFICULTY; i++) {
-        const seed =
-          parseInt(`${Date.now()}${i}`.slice(-9)) +
-          i * 997 +
-          GAME_TYPES.indexOf(gameType) * 10000 +
-          DIFFICULTIES.indexOf(difficulty) * 100000;
-
-        const label = `  generate-${gameType}-${difficulty}-${i}`;
+        const seed = Math.abs(Math.floor(Date.now() / 1000)) + i * 997 + GAME_TYPES.indexOf(gameType) * 10_000 + DIFFICULTIES.indexOf(difficulty) * 100_000;
+        const label = `    [${i+1}/${PUZZLES_PER_DIFFICULTY}] ${gameType}-${difficulty}`;
         console.time(label);
-
-        try {
-          const { puzzleData, solution, seed: actualSeed } = GENERATORS[gameType](difficulty, seed);
-          batch.push({
-            gameType,
-            difficulty,
-            puzzleData: puzzleData as object,
-            solution: solution as object,
-            seed: actualSeed,
-          });
-        } catch (err) {
-          console.error(`    ⚠️  Failed to generate ${gameType} ${difficulty} #${i}: ${err}`);
-        }
-
+        const r = await tryGenerate(gameType, difficulty, seed);
+        if (r) batch.push({ gameType, difficulty, puzzleData: r.puzzleData as object, solution: r.solution as object, seed: r.seed });
         console.timeEnd(label);
       }
 
-      if (batch.length === 0) {
-        console.warn(`  ⚠️  No puzzles generated for ${key}, skipping DB insert`);
-        puzzleIdMap.set(key, []);
-        continue;
-      }
+      if (batch.length === 0) { console.warn(`  ⚠️  Zero puzzles for ${key}\n`); map.set(key, []); continue; }
 
-      // Insert one by one so we get back each created ID reliably.
-      // createMany doesn't return IDs in Prisma, and findMany after createMany
-      // would fetch ALL rows for that game/difficulty — not just the new batch.
       const ids: string[] = [];
       for (const row of batch) {
-        const created = await prisma.gamePuzzle.create({
-          data: row,
-          select: { id: true },
-        });
-        ids.push(created.id);
+        const c = await prisma.gamePuzzle.create({ data: row, select: { id: true } });
+        ids.push(c.id);
       }
-
-      puzzleIdMap.set(key, ids);
-      console.log(`  ✅ ${gameType} ${difficulty}: ${ids.length} puzzles created`);
+      map.set(key, ids);
+      console.log(`  ✅ ${key}: ${ids.length} puzzles\n`);
     }
   }
-
-  return puzzleIdMap;
+  return map;
 }
 
-async function seedDailyPuzzles(puzzleIdMap: Map<string, string[]>): Promise<void> {
-  console.log('\n📅 Assigning daily puzzles for 365 days...');
+async function seedDaily(map: Map<string, string[]>) {
+  console.log(`📅 Assigning ${DAILY_DAYS} days of daily puzzles...\n`);
+  const start = new Date(); start.setUTCHours(0,0,0,0);
+  const used = new Map<string, number>();
+  const rota: Difficulty[] = ['medium','hard','medium','easy','hard','expert'];
 
-  const startDate = new Date();
-  startDate.setUTCHours(0, 0, 0, 0);
+  for (let d = 0; d < DAILY_DAYS; d++) {
+    const dt = new Date(start); dt.setUTCDate(dt.getUTCDate() + d);
+    const dateStr = toISO(dt);
+    const diff = rota[d % rota.length];
 
-  const usedIndices = new Map<string, number>();
-
-  const dailyDifficulties: Difficulty[] = ['medium', 'hard', 'medium', 'hard', 'easy', 'expert'];
-
-  for (let dayOffset = 0; dayOffset < DAILY_DAYS; dayOffset++) {
-    const date = new Date(startDate);
-    date.setUTCDate(date.getUTCDate() + dayOffset);
-    const dateStr = toISODate(date);
-
-    for (const gameType of GAME_TYPES) {
-      const difficulty = dailyDifficulties[dayOffset % dailyDifficulties.length];
-      const key = `${gameType}:${difficulty}`;
-      const ids = puzzleIdMap.get(key) ?? [];
-
+    for (const gt of GAME_TYPES) {
+      let key = `${gt}:${diff}`;
+      let ids = map.get(key) ?? [];
+      // Fall back to any available difficulty for this game
       if (ids.length === 0) {
-        console.warn(`  ⚠️  No puzzles for ${key}`);
-        continue;
+        const fallback = DIFFICULTIES.map(fd=>`${gt}:${fd}`).find(k=>(map.get(k)?.length??0)>0);
+        if (!fallback) continue;
+        key = fallback; ids = map.get(key)!;
       }
-
-      const currentIdx = usedIndices.get(key) ?? 0;
-      const puzzleId = ids[currentIdx % ids.length];
-      usedIndices.set(key, currentIdx + 1);
-
+      const idx = used.get(key) ?? 0;
       await prisma.dailyPuzzle.upsert({
-        where: { gameType_date: { gameType, date: dateStr } },
-        create: { gameType, date: dateStr, puzzleId },
-        update: { puzzleId },
+        where: { gameType_date: { gameType: gt, date: dateStr } },
+        create: { gameType: gt, date: dateStr, puzzleId: ids[idx % ids.length] },
+        update: { puzzleId: ids[idx % ids.length] },
       });
+      used.set(key, idx + 1);
     }
-
-    if (dayOffset % 30 === 0) {
-      console.log(`  ✅ Assigned daily puzzles through day ${dayOffset + 1}`);
-    }
+    if (d % 30 === 0) console.log(`  ✅ Day ${d+1} assigned`);
   }
-
-  console.log(
-    `  ✅ ${DAILY_DAYS} days × ${GAME_TYPES.length} games = ${DAILY_DAYS * GAME_TYPES.length} daily puzzle assignments`
-  );
+  console.log(`\n  ✅ Complete`);
 }
 
-async function main(): Promise<void> {
-  console.log('🌱 Starting Puzzle Roll seed...\n');
-
-  console.log('🧹 Clearing existing puzzle data...');
+async function main() {
+  console.log('🌱 Puzzle Roll seed starting...\n');
+  console.log('🧹 Clearing existing data...');
   await prisma.gameCompletion.deleteMany();
   await prisma.dailyPuzzle.deleteMany();
   await prisma.gamePuzzle.deleteMany();
+  console.log('   Done.\n');
 
-  const puzzleIdMap = await seedPuzzles();
-  await seedDailyPuzzles(puzzleIdMap);
+  const map = await seedPuzzles();
+  await seedDaily(map);
 
-  const totalPuzzles = await prisma.gamePuzzle.count();
-  const totalDaily = await prisma.dailyPuzzle.count();
-
-  console.log(`\n✨ Seed complete!`);
-  console.log(`   ${totalPuzzles} puzzles created`);
-  console.log(`   ${totalDaily} daily puzzle assignments created`);
+  console.log(`\n✨ Done! ${await prisma.gamePuzzle.count()} puzzles, ${await prisma.dailyPuzzle.count()} daily assignments.`);
 }
 
 main()
-  .catch((e) => {
-    console.error('❌ Seed failed:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .catch(e => { console.error('❌', e); process.exit(1); })
+  .finally(() => prisma.$disconnect());

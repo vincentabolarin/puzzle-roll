@@ -27,6 +27,7 @@ export type AggregateUser = {
 export type UserMinAggregateOutputType = {
   id: string | null
   email: string | null
+  username: string | null
   passwordHash: string | null
   isAnonymous: boolean | null
   deviceId: string | null
@@ -37,6 +38,7 @@ export type UserMinAggregateOutputType = {
 export type UserMaxAggregateOutputType = {
   id: string | null
   email: string | null
+  username: string | null
   passwordHash: string | null
   isAnonymous: boolean | null
   deviceId: string | null
@@ -47,6 +49,7 @@ export type UserMaxAggregateOutputType = {
 export type UserCountAggregateOutputType = {
   id: number
   email: number
+  username: number
   passwordHash: number
   isAnonymous: number
   deviceId: number
@@ -59,6 +62,7 @@ export type UserCountAggregateOutputType = {
 export type UserMinAggregateInputType = {
   id?: true
   email?: true
+  username?: true
   passwordHash?: true
   isAnonymous?: true
   deviceId?: true
@@ -69,6 +73,7 @@ export type UserMinAggregateInputType = {
 export type UserMaxAggregateInputType = {
   id?: true
   email?: true
+  username?: true
   passwordHash?: true
   isAnonymous?: true
   deviceId?: true
@@ -79,6 +84,7 @@ export type UserMaxAggregateInputType = {
 export type UserCountAggregateInputType = {
   id?: true
   email?: true
+  username?: true
   passwordHash?: true
   isAnonymous?: true
   deviceId?: true
@@ -162,6 +168,7 @@ export type UserGroupByArgs<ExtArgs extends runtime.Types.Extensions.InternalArg
 export type UserGroupByOutputType = {
   id: string
   email: string | null
+  username: string | null
   passwordHash: string | null
   isAnonymous: boolean
   deviceId: string | null
@@ -193,6 +200,7 @@ export type UserWhereInput = {
   NOT?: Prisma.UserWhereInput | Prisma.UserWhereInput[]
   id?: Prisma.StringFilter<"User"> | string
   email?: Prisma.StringNullableFilter<"User"> | string | null
+  username?: Prisma.StringNullableFilter<"User"> | string | null
   passwordHash?: Prisma.StringNullableFilter<"User"> | string | null
   isAnonymous?: Prisma.BoolFilter<"User"> | boolean
   deviceId?: Prisma.StringNullableFilter<"User"> | string | null
@@ -207,6 +215,7 @@ export type UserWhereInput = {
 export type UserOrderByWithRelationInput = {
   id?: Prisma.SortOrder
   email?: Prisma.SortOrderInput | Prisma.SortOrder
+  username?: Prisma.SortOrderInput | Prisma.SortOrder
   passwordHash?: Prisma.SortOrderInput | Prisma.SortOrder
   isAnonymous?: Prisma.SortOrder
   deviceId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -221,6 +230,7 @@ export type UserOrderByWithRelationInput = {
 export type UserWhereUniqueInput = Prisma.AtLeast<{
   id?: string
   email?: string
+  username?: string
   deviceId?: string
   AND?: Prisma.UserWhereInput | Prisma.UserWhereInput[]
   OR?: Prisma.UserWhereInput[]
@@ -233,11 +243,12 @@ export type UserWhereUniqueInput = Prisma.AtLeast<{
   stats?: Prisma.UserStatsListRelationFilter
   completions?: Prisma.GameCompletionListRelationFilter
   pushTokens?: Prisma.PushTokenListRelationFilter
-}, "id" | "email" | "deviceId">
+}, "id" | "email" | "username" | "deviceId">
 
 export type UserOrderByWithAggregationInput = {
   id?: Prisma.SortOrder
   email?: Prisma.SortOrderInput | Prisma.SortOrder
+  username?: Prisma.SortOrderInput | Prisma.SortOrder
   passwordHash?: Prisma.SortOrderInput | Prisma.SortOrder
   isAnonymous?: Prisma.SortOrder
   deviceId?: Prisma.SortOrderInput | Prisma.SortOrder
@@ -254,6 +265,7 @@ export type UserScalarWhereWithAggregatesInput = {
   NOT?: Prisma.UserScalarWhereWithAggregatesInput | Prisma.UserScalarWhereWithAggregatesInput[]
   id?: Prisma.StringWithAggregatesFilter<"User"> | string
   email?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
+  username?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
   passwordHash?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
   isAnonymous?: Prisma.BoolWithAggregatesFilter<"User"> | boolean
   deviceId?: Prisma.StringNullableWithAggregatesFilter<"User"> | string | null
@@ -264,6 +276,7 @@ export type UserScalarWhereWithAggregatesInput = {
 export type UserCreateInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -278,6 +291,7 @@ export type UserCreateInput = {
 export type UserUncheckedCreateInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -292,6 +306,7 @@ export type UserUncheckedCreateInput = {
 export type UserUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -306,6 +321,7 @@ export type UserUpdateInput = {
 export type UserUncheckedUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -320,6 +336,7 @@ export type UserUncheckedUpdateInput = {
 export type UserCreateManyInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -330,6 +347,7 @@ export type UserCreateManyInput = {
 export type UserUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -340,6 +358,7 @@ export type UserUpdateManyMutationInput = {
 export type UserUncheckedUpdateManyInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -350,6 +369,7 @@ export type UserUncheckedUpdateManyInput = {
 export type UserCountOrderByAggregateInput = {
   id?: Prisma.SortOrder
   email?: Prisma.SortOrder
+  username?: Prisma.SortOrder
   passwordHash?: Prisma.SortOrder
   isAnonymous?: Prisma.SortOrder
   deviceId?: Prisma.SortOrder
@@ -360,6 +380,7 @@ export type UserCountOrderByAggregateInput = {
 export type UserMaxOrderByAggregateInput = {
   id?: Prisma.SortOrder
   email?: Prisma.SortOrder
+  username?: Prisma.SortOrder
   passwordHash?: Prisma.SortOrder
   isAnonymous?: Prisma.SortOrder
   deviceId?: Prisma.SortOrder
@@ -370,6 +391,7 @@ export type UserMaxOrderByAggregateInput = {
 export type UserMinOrderByAggregateInput = {
   id?: Prisma.SortOrder
   email?: Prisma.SortOrder
+  username?: Prisma.SortOrder
   passwordHash?: Prisma.SortOrder
   isAnonymous?: Prisma.SortOrder
   deviceId?: Prisma.SortOrder
@@ -457,6 +479,7 @@ export type UserUpdateOneRequiredWithoutCompletionsNestedInput = {
 export type UserCreateWithoutSettingsInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -470,6 +493,7 @@ export type UserCreateWithoutSettingsInput = {
 export type UserUncheckedCreateWithoutSettingsInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -499,6 +523,7 @@ export type UserUpdateToOneWithWhereWithoutSettingsInput = {
 export type UserUpdateWithoutSettingsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -512,6 +537,7 @@ export type UserUpdateWithoutSettingsInput = {
 export type UserUncheckedUpdateWithoutSettingsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -525,6 +551,7 @@ export type UserUncheckedUpdateWithoutSettingsInput = {
 export type UserCreateWithoutPushTokensInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -538,6 +565,7 @@ export type UserCreateWithoutPushTokensInput = {
 export type UserUncheckedCreateWithoutPushTokensInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -567,6 +595,7 @@ export type UserUpdateToOneWithWhereWithoutPushTokensInput = {
 export type UserUpdateWithoutPushTokensInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -580,6 +609,7 @@ export type UserUpdateWithoutPushTokensInput = {
 export type UserUncheckedUpdateWithoutPushTokensInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -593,6 +623,7 @@ export type UserUncheckedUpdateWithoutPushTokensInput = {
 export type UserCreateWithoutStatsInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -606,6 +637,7 @@ export type UserCreateWithoutStatsInput = {
 export type UserUncheckedCreateWithoutStatsInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -635,6 +667,7 @@ export type UserUpdateToOneWithWhereWithoutStatsInput = {
 export type UserUpdateWithoutStatsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -648,6 +681,7 @@ export type UserUpdateWithoutStatsInput = {
 export type UserUncheckedUpdateWithoutStatsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -661,6 +695,7 @@ export type UserUncheckedUpdateWithoutStatsInput = {
 export type UserCreateWithoutCompletionsInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -674,6 +709,7 @@ export type UserCreateWithoutCompletionsInput = {
 export type UserUncheckedCreateWithoutCompletionsInput = {
   id?: string
   email?: string | null
+  username?: string | null
   passwordHash?: string | null
   isAnonymous?: boolean
   deviceId?: string | null
@@ -703,6 +739,7 @@ export type UserUpdateToOneWithWhereWithoutCompletionsInput = {
 export type UserUpdateWithoutCompletionsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -716,6 +753,7 @@ export type UserUpdateWithoutCompletionsInput = {
 export type UserUncheckedUpdateWithoutCompletionsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   email?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  username?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   passwordHash?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   isAnonymous?: Prisma.BoolFieldUpdateOperationsInput | boolean
   deviceId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
@@ -778,6 +816,7 @@ export type UserCountOutputTypeCountPushTokensArgs<ExtArgs extends runtime.Types
 export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   email?: boolean
+  username?: boolean
   passwordHash?: boolean
   isAnonymous?: boolean
   deviceId?: boolean
@@ -793,6 +832,7 @@ export type UserSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
 export type UserSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   email?: boolean
+  username?: boolean
   passwordHash?: boolean
   isAnonymous?: boolean
   deviceId?: boolean
@@ -803,6 +843,7 @@ export type UserSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensio
 export type UserSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   id?: boolean
   email?: boolean
+  username?: boolean
   passwordHash?: boolean
   isAnonymous?: boolean
   deviceId?: boolean
@@ -813,6 +854,7 @@ export type UserSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensio
 export type UserSelectScalar = {
   id?: boolean
   email?: boolean
+  username?: boolean
   passwordHash?: boolean
   isAnonymous?: boolean
   deviceId?: boolean
@@ -820,7 +862,7 @@ export type UserSelectScalar = {
   updatedAt?: boolean
 }
 
-export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "email" | "passwordHash" | "isAnonymous" | "deviceId" | "createdAt" | "updatedAt", ExtArgs["result"]["user"]>
+export type UserOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "email" | "username" | "passwordHash" | "isAnonymous" | "deviceId" | "createdAt" | "updatedAt", ExtArgs["result"]["user"]>
 export type UserInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   settings?: boolean | Prisma.User$settingsArgs<ExtArgs>
   stats?: boolean | Prisma.User$statsArgs<ExtArgs>
@@ -842,6 +884,7 @@ export type $UserPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     id: string
     email: string | null
+    username: string | null
     passwordHash: string | null
     isAnonymous: boolean
     deviceId: string | null
@@ -1276,6 +1319,7 @@ export interface Prisma__UserClient<T, Null = never, ExtArgs extends runtime.Typ
 export interface UserFieldRefs {
   readonly id: Prisma.FieldRef<"User", 'String'>
   readonly email: Prisma.FieldRef<"User", 'String'>
+  readonly username: Prisma.FieldRef<"User", 'String'>
   readonly passwordHash: Prisma.FieldRef<"User", 'String'>
   readonly isAnonymous: Prisma.FieldRef<"User", 'Boolean'>
   readonly deviceId: Prisma.FieldRef<"User", 'String'>

@@ -1,19 +1,20 @@
 import {
-  IsBoolean,
-  IsInt,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
+  IsBoolean, IsInt, IsOptional, IsString,
+  MaxLength, Max, Min, Matches,
 } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { GameType } from '@puzzle-roll/shared';
+import { Transform } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class UpdateUserDto {
-  @ApiPropertyOptional()
-  @IsOptional()
+export class UpdateUsernameDto {
+  @ApiProperty({ example: 'PuzzleMaster99', minLength: 2, maxLength: 20 })
   @IsString()
-  username?: string;
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  // 2–20 chars, alphanumeric + underscores + hyphens, no leading/trailing special chars
+  @Matches(/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,18}[a-zA-Z0-9]$|^[a-zA-Z0-9]{1,20}$/, {
+    message: 'Username must be 2–20 characters, letters/numbers/underscores/hyphens only',
+  })
+  @MaxLength(20)
+  username!: string;
 }
 
 export class UpdateNotificationsDto {
@@ -37,11 +38,13 @@ export class UpdateNotificationsDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   pushToken?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @Matches(/^(ios|android)$/, { message: 'Platform must be ios or android' })
   platform?: string;
 }
 

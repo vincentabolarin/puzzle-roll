@@ -1,7 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-// import { prisma } from '@puzzle-roll/database';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { GameType } from '@puzzle-roll/shared';
-import { UpdateNotificationsDto, UpdateSettingsDto } from './users.dto';
+import { UpdateNotificationsDto, UpdateSettingsDto, UpdateUsernameDto } from './users.dto';
 import { PrismaService } from '../common/prisma/prisma.service';
 
 @Injectable()
@@ -12,27 +11,43 @@ export class UsersService {
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: {
-        settings: true,
-        stats: true,
-      },
+      include: { settings: true, stats: true },
     });
-
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    // Never expose passwordHash
+    const { passwordHash: _, ...safe } = user;
+    return safe;
   }
 
   async getStats(userId: string) {
-    const stats = await this.prisma.userStats.findMany({
+    return this.prisma.userStats.findMany({
       where: { userId },
       orderBy: { gameType: 'asc' },
     });
-    return stats;
+  }
+
+  async updateUsername(userId: string, dto: UpdateUsernameDto) {
+    const existing = await this.prisma.user.findUnique({ where: { username: dto.username } });
+    if (existing && existing.id !== userId) {
+      throw new ConflictException('Username is already taken');
+    }
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { username: dto.username },
+      select: { id: true, username: true, email: true, isAnonymous: true },
+    });
+  }
+
+  async clearStats(userId: string, gameType?: GameType) {
+    if (gameType) {
+      await this.prisma.userStats.deleteMany({ where: { userId, gameType } });
+    } else {
+      await this.prisma.userStats.deleteMany({ where: { userId } });
+    }
   }
 
   async updateNotifications(userId: string, dto: UpdateNotificationsDto) {
     const settingsData: Record<string, unknown> = {};
-
     if (dto.notificationEnabled !== undefined) settingsData['notificationEnabled'] = dto.notificationEnabled;
     if (dto.notificationHour !== undefined) settingsData['notificationHour'] = dto.notificationHour;
     if (dto.timezoneOffsetMinutes !== undefined) settingsData['timezoneOffsetMinutes'] = dto.timezoneOffsetMinutes;
@@ -79,10 +94,8 @@ export class UsersService {
     isDaily: boolean,
     completedDate: string
   ) {
-    const gt = gameType;
-
     const existing = await this.prisma.userStats.findUnique({
-      where: { userId_gameType: { userId, gameType: gt } },
+      where: { userId_gameType: { userId, gameType } },
     });
 
     const today = completedDate;
@@ -91,25 +104,29 @@ export class UsersService {
     let currentStreak = existing?.currentStreak ?? 0;
     let longestStreak = existing?.longestStreak ?? 0;
 
+    // Streak only increments for daily puzzle completions.
+    // Day 1 = streak of 1. Consecutive days = streak keeps growing.
+    // Missing a day resets to 1 on next daily completion.
     if (completed && isDaily) {
       if (existing?.lastPlayedDate === yesterday) {
         currentStreak += 1;
       } else if (existing?.lastPlayedDate !== today) {
-        currentStreak = 1;
+        currentStreak = 1; // new streak starts at 1, not 0
       }
+      // If lastPlayedDate === today, same-day completion — streak unchanged
       longestStreak = Math.max(longestStreak, currentStreak);
     }
 
     const bestTime =
-      completed && (existing?.bestTime === null || existing?.bestTime === undefined || elapsedSeconds < (existing.bestTime ?? Infinity))
+      completed &&
+      (existing?.bestTime === null || existing?.bestTime === undefined || elapsedSeconds < (existing.bestTime ?? Infinity))
         ? elapsedSeconds
         : existing?.bestTime ?? null;
 
     await this.prisma.userStats.upsert({
-      where: { userId_gameType: { userId, gameType: gt } },
+      where: { userId_gameType: { userId, gameType } },
       create: {
-        userId,
-        gameType: gt,
+        userId, gameType,
         gamesPlayed: 1,
         gamesCompleted: completed ? 1 : 0,
         bestTime: completed ? elapsedSeconds : null,
