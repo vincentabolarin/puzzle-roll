@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/futoshiki';
+export { generateFutoshiki } from '@puzzle-roll/shared';

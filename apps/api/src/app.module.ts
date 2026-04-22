@@ -11,6 +11,7 @@ import { ProgressModule } from './progress/progress.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthController } from './health.controller';
+import { PrismaModule } from './common/prisma/prisma.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { HealthController } from './health.controller';
     ProgressModule,
     NotificationsModule,
     AdminModule,
+    PrismaModule
   ],
   controllers: [HealthController],
 })

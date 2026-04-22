@@ -6,10 +6,26 @@
     "strictNullChecks": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+    "jsx": "react-jsx",
+    "jsxImportSource": "nativewind",
     "paths": {
-      "@/*": ["./src/*"],
-      "@puzzle-roll/shared": ["../../packages/shared/src"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@puzzle-roll/shared": [
+        "../../packages/shared/src"
+      ],
+      "@puzzle-roll/ui": [
+        "../../packages/ui/src"
+      ]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.d.ts", "expo-env.d.ts"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.d.ts",
+    "expo-env.d.ts",
+    "nativewind-env.d.ts",
+    ".expo/types/**/*.ts"
+  ]
 }

@@ -1,3 +1,4 @@
+import { Difficulty, GameType } from '@puzzle-roll/shared';
 import * as SQLite from 'expo-sqlite';
 
 const DB_NAME = 'puzzleroll.db';
@@ -6,13 +7,13 @@ const DB_VERSION = 1;
 interface CachedPuzzle {
   id: string;
   gameType: string;
-  difficulty: string;
+  difficulty: Difficulty;
   puzzleData: string; // JSON string
   cachedAt: number;
 }
 
 interface CachedDailyPuzzle {
-  gameType: string;
+  gameType: GameType;
   date: string;
   dailyPuzzleId: string;
   puzzleId: string;
@@ -24,7 +25,7 @@ interface CachedCompletion {
   id: string;
   puzzleId: string;
   completedAt: string;
-  gameType: string;
+  gameType: GameType;
 }
 
 class PuzzleCacheService {
@@ -84,7 +85,7 @@ class PuzzleCacheService {
 
   // ─── Puzzles ──────────────────────────────────────────────────────────────
 
-  async cachePuzzles(puzzles: Array<{ id: string; gameType: string; difficulty: string; puzzleData: unknown }>): Promise<void> {
+  async cachePuzzles(puzzles: Array<{ id: string; gameType: GameType; difficulty: Difficulty; puzzleData: unknown }>): Promise<void> {
     if (!this.db) return;
     const now = Date.now();
 
@@ -99,12 +100,12 @@ class PuzzleCacheService {
     });
   }
 
-  async getPuzzles(gameType: string, difficulty: string, limit = 20): Promise<CachedPuzzle[]> {
+  async getPuzzles(gameType: GameType, difficulty: Difficulty, limit = 20): Promise<CachedPuzzle[]> {
     if (!this.db) return [];
     const rows = await this.db.getAllAsync<{
       id: string;
       game_type: string;
-      difficulty: string;
+      difficulty: Difficulty;
       puzzle_data: string;
       cached_at: number;
     }>(
@@ -129,8 +130,8 @@ class PuzzleCacheService {
     if (!this.db) return null;
     const row = await this.db.getFirstAsync<{
       id: string;
-      game_type: string;
-      difficulty: string;
+      game_type: GameType;
+      difficulty: Difficulty;
       puzzle_data: string;
       cached_at: number;
     }>(`SELECT * FROM puzzles WHERE id = ?`, [id]);
@@ -156,7 +157,7 @@ class PuzzleCacheService {
   // ─── Daily Puzzles ────────────────────────────────────────────────────────
 
   async cacheDailyPuzzle(params: {
-    gameType: string;
+    gameType: GameType;
     date: string;
     dailyPuzzleId: string;
     puzzleId: string;
@@ -184,11 +185,11 @@ class PuzzleCacheService {
     );
   }
 
-  async getDailyPuzzle(gameType: string, date: string): Promise<CachedDailyPuzzle | null> {
+  async getDailyPuzzle(gameType: GameType, date: string): Promise<CachedDailyPuzzle | null> {
     if (!this.db) return null;
     const now = Date.now();
     const row = await this.db.getFirstAsync<{
-      game_type: string;
+      game_type: GameType;
       date: string;
       daily_puzzle_id: string;
       puzzle_id: string;

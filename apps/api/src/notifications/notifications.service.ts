@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
-import { prisma } from '@puzzle-roll/database';
+import { PrismaService } from '../common/prisma/prisma.service';
 
 export const NOTIFICATION_QUEUE = 'notifications';
 export const DAILY_PUZZLE_ROTATION_QUEUE = 'daily-puzzle-rotation';
@@ -28,7 +28,8 @@ export class NotificationsService {
   private readonly expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
 
   constructor(
-    @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue
+    @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
+    private readonly prisma: PrismaService
   ) {}
 
   async sendPushNotifications(messages: ExpoPushMessage[]): Promise<void> {
@@ -52,7 +53,7 @@ export class NotificationsService {
 
   async enqueueDailyReminders(): Promise<void> {
     // Fetch all opted-in users with push tokens
-    const users = await prisma.userSettings.findMany({
+    const users = await this.prisma.userSettings.findMany({
       where: { notificationEnabled: true },
       include: {
         user: {
@@ -103,7 +104,7 @@ export class NotificationsService {
     const today = new Date().toISOString().slice(0, 10);
 
     // Find users with active streaks >= 3 who haven't played today
-    const usersWithStreaks = await prisma.userStats.findMany({
+    const usersWithStreaks = await this.prisma.userStats.findMany({
       where: { currentStreak: { gte: 3 } },
       include: {
         user: {
@@ -120,7 +121,7 @@ export class NotificationsService {
       if (!settings?.notificationEnabled) continue;
 
       // Check if user has played any daily puzzle today
-      const playedToday = await prisma.gameCompletion.findFirst({
+      const playedToday = await this.prisma.gameCompletion.findFirst({
         where: {
           userId: stat.userId,
           isDaily: true,

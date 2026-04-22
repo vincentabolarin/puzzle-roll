@@ -31,6 +31,11 @@ interface GameSessionActions {
     isDaily: boolean;
     dailyPuzzleId: string | null;
     initialState: TState;
+    /** Restore elapsed time when resuming a saved session. Defaults to 0. */
+    initialElapsedSeconds?: number;
+    /** Restore hints state when resuming a saved session. */
+    initialHintsUsed?: number;
+    initialHintsRemaining?: number;
   }) => void;
   updateState: <TState>(newState: TState, pushToUndo?: boolean) => void;
   undo: () => void;
@@ -46,7 +51,12 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
   session: null,
   timerInterval: null,
 
-  startSession: ({ puzzleId, gameType, difficulty, isDaily, dailyPuzzleId, initialState }) => {
+  startSession: ({
+    puzzleId, gameType, difficulty, isDaily, dailyPuzzleId, initialState,
+    initialElapsedSeconds = 0,
+    initialHintsUsed = 0,
+    initialHintsRemaining = 3,
+  }) => {
     const { timerInterval } = get();
     if (timerInterval) clearInterval(timerInterval);
 
@@ -69,9 +79,9 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
         dailyPuzzleId,
         startedAt: new Date(),
         completedAt: null,
-        hintsUsed: 0,
-        hintsRemaining: 3,
-        elapsedSeconds: 0,
+        hintsUsed: initialHintsUsed,
+        hintsRemaining: initialHintsRemaining,
+        elapsedSeconds: initialElapsedSeconds,
         isPaused: false,
         isSolved: false,
         undoStack: [],
@@ -87,13 +97,7 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
       const undoStack = pushToUndo
         ? [...s.session.undoStack.slice(-19), s.session.currentState]
         : s.session.undoStack;
-      return {
-        session: {
-          ...s.session,
-          currentState: newState,
-          undoStack,
-        },
-      };
+      return { session: { ...s.session, currentState: newState, undoStack } };
     });
   },
 
@@ -102,13 +106,7 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
       if (!s.session || s.session.undoStack.length === 0) return s;
       const undoStack = [...s.session.undoStack];
       const previousState = undoStack.pop();
-      return {
-        session: {
-          ...s.session,
-          currentState: previousState,
-          undoStack,
-        },
-      };
+      return { session: { ...s.session, currentState: previousState, undoStack } };
     });
   },
 
@@ -117,11 +115,7 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
     if (!session || session.hintsRemaining <= 0) return false;
     set((s) => ({
       session: s.session
-        ? {
-            ...s.session,
-            hintsUsed: s.session.hintsUsed + 1,
-            hintsRemaining: s.session.hintsRemaining - 1,
-          }
+        ? { ...s.session, hintsUsed: s.session.hintsUsed + 1, hintsRemaining: s.session.hintsRemaining - 1 }
         : null,
     }));
     return true;
@@ -138,17 +132,8 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
     }));
   },
 
-  pauseTimer: () => {
-    set((s) => ({
-      session: s.session ? { ...s.session, isPaused: true } : null,
-    }));
-  },
-
-  resumeTimer: () => {
-    set((s) => ({
-      session: s.session ? { ...s.session, isPaused: false } : null,
-    }));
-  },
+  pauseTimer: () => set((s) => ({ session: s.session ? { ...s.session, isPaused: true } : null })),
+  resumeTimer: () => set((s) => ({ session: s.session ? { ...s.session, isPaused: false } : null })),
 
   clearSession: () => {
     const { timerInterval } = get();

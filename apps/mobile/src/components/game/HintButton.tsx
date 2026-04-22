@@ -1,4 +1,5 @@
-import { TouchableOpacity, Text, View } from 'react-native';
+import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
+import { useAppTheme } from '../../hooks/useAppTheme';
 
 interface HintButtonProps {
   hintsRemaining: number;
@@ -8,31 +9,54 @@ interface HintButtonProps {
 
 export default function HintButton({ hintsRemaining, onPress, disabled }: HintButtonProps) {
   const hasHints = hintsRemaining > 0;
+  const t = useAppTheme();
+  const isDark = t.background !== '#f9fafb';
 
   return (
     <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
-      className={`flex-row items-center gap-1.5 rounded-xl px-3 py-2 border ${
-        hasHints
-          ? 'bg-surface border-border-subtle'
-          : 'bg-amber-900/20 border-amber-700/40'
-      }`}
-      accessibilityLabel={
-        hasHints
-          ? `Use hint, ${hintsRemaining} remaining`
-          : 'Watch ad to earn a hint'
-      }
+      style={[
+        styles.btn,
+        {
+          backgroundColor: hasHints ? (isDark ? '#1f2937' : '#f3f4f6') : '#451a03',
+          borderColor: hasHints ? t.border : '#92400e',
+        },
+      ]}
+      accessibilityLabel={hasHints ? `Hint — ${hintsRemaining} left` : 'Watch ad for hint'}
       accessibilityRole="button"
     >
-      <Text className="text-base">💡</Text>
-      <Text
-        className={`font-sans-medium text-sm ${
-          hasHints ? 'text-text-primary' : 'text-amber-400'
-        }`}
-      >
-        {hasHints ? hintsRemaining : '+'}
-      </Text>
+      {/* Row 1: icon + count side by side */}
+      <View style={styles.topRow}>
+        <Text style={styles.icon}>💡</Text>
+        <Text style={[styles.count, { color: hasHints ? t.textPrimary : '#fbbf24' }]}>
+          {hasHints ? hintsRemaining : '+'}
+        </Text>
+      </View>
+      {/* Row 2: label */}
+      {/* <Text style={[styles.label, { color: t.textMuted }]}>Hint</Text> */}
     </TouchableOpacity>
   );
 }
+
+const styles = StyleSheet.create({
+  btn: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    minWidth: 52,
+    minHeight: 52,
+    borderWidth: 1,
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  icon: { fontSize: 14 },
+  count: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 13 },
+  label: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 9, lineHeight: 13, marginTop: 1 },
+});

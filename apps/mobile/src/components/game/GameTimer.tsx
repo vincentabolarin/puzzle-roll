@@ -1,5 +1,6 @@
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useGameSessionStore } from '../../stores/game-session.store';
+import { useAppTheme } from '../../hooks/useAppTheme';
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -9,22 +10,32 @@ function formatTime(seconds: number): string {
 
 export default function GameTimer() {
   const { session, pauseTimer, resumeTimer } = useGameSessionStore();
+  const t = useAppTheme();
 
   if (!session) return null;
 
   return (
     <TouchableOpacity
       onPress={session.isPaused ? resumeTimer : pauseTimer}
-      className="flex-row items-center gap-2"
+      style={styles.row}
       accessibilityLabel={session.isPaused ? 'Resume timer' : 'Pause timer'}
       accessibilityRole="button"
     >
-      <Text className="text-text-primary font-mono text-lg">
+      <Text style={[styles.time, { color: t.textPrimary }]}>
         {formatTime(session.elapsedSeconds)}
       </Text>
-      <Text className="text-text-secondary font-sans text-sm">
-        {session.isPaused ? '▶' : '⏸'}
-      </Text>
+      <View style={[styles.badge, { backgroundColor: t.surface2 }]}>
+        <Text style={[styles.badgeText, { color: t.textSecondary }]}>
+          {session.isPaused ? '▶' : '⏸'}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
+
+const styles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  time: { fontFamily: 'JetBrainsMono-Regular', fontSize: 20 },
+  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  badgeText: { fontSize: 12 },
+});

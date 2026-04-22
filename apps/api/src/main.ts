@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -48,12 +48,32 @@ async function bootstrap(): Promise<void> {
   }
 
   const port = parseInt(process.env.PORT ?? '3000', 10);
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   console.log(`🎲 Puzzle Roll API running on port ${port}`);
 
   if (process.env.NODE_ENV !== 'production') {
     console.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
   }
+
+  Logger.log(`
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║   🟠 Puzzle Roll API                                            ║
+║                                                              ║
+║   🚀  Running on port ${port}                                   ║
+║                                                               ║
+║   🔧  Environment:   ${(process.env.NODE_ENV ?? 'development').padEnd(12)}                ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+  `);
+
+  if (process.env.NODE_ENV !== 'production') {
+    Logger.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
+  }
 }
 
-bootstrap();
+bootstrap().catch((error: Error) => {
+  console.error('❌ Failed to start Puzzle Roll API:', error.message);
+  console.error(error.stack);
+  process.exit(1);
+});

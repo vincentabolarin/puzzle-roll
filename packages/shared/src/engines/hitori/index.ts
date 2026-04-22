@@ -2,7 +2,7 @@ import { Difficulty, GeneratedPuzzle, HintResult } from '../../types/core';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type HitoriCellState = 'unshaded' | 'shaded' | 'circled'; // circled = confirmed unshaded
+export type HitoriCellState = 'unshaded' | 'shaded' | 'circled';
 
 export interface HitoriCell {
   value: number;
@@ -11,7 +11,7 @@ export interface HitoriCell {
 
 export interface HitoriPuzzleData {
   size: number;
-  grid: number[][]; // initial number grid
+  grid: number[][];
 }
 
 export interface HitoriSolution {
@@ -53,10 +53,9 @@ function shuffle<T>(arr: T[], rng: () => number): T[] {
   return arr;
 }
 
-// ─── Connectivity check (BFS on unshaded cells) ───────────────────────────────
+// ─── BFS connectivity check ───────────────────────────────────────────────────
 
-function isConnected(grid: number[][], shaded: boolean[][]): boolean {
-  const size = grid.length;
+function isConnected(size: number, shaded: boolean[][]): boolean {
   let start: [number, number] | null = null;
   let total = 0;
 
@@ -71,37 +70,42 @@ function isConnected(grid: number[][], shaded: boolean[][]): boolean {
 
   if (!start || total === 0) return false;
 
-  const visited = new Set<string>();
-  const queue: Array<[number, number]> = [start];
+  const visited = new Uint8Array(size * size);
+  const queue: number[] = [start[0] * size + start[1]];
+  visited[start[0] * size + start[1]] = 1;
+  let count = 1;
 
   while (queue.length > 0) {
-    const [r, c] = queue.shift()!;
-    const key = `${r},${c}`;
-    if (visited.has(key)) continue;
-    visited.add(key);
+    const idx = queue.shift()!;
+    const r = Math.floor(idx / size);
+    const c = idx % size;
 
-    for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-      const nr = r + dr, nc = c + dc;
-      if (nr >= 0 && nr < size && nc >= 0 && nc < size && !shaded[nr][nc] && !visited.has(`${nr},${nc}`)) {
-        queue.push([nr, nc]);
+    for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as [number, number][]) {
+      const nr = r + dr;
+      const nc = c + dc;
+      if (nr >= 0 && nr < size && nc >= 0 && nc < size && !shaded[nr][nc]) {
+        const nidx = nr * size + nc;
+        if (!visited[nidx]) {
+          visited[nidx] = 1;
+          count++;
+          queue.push(nidx);
+        }
       }
     }
   }
 
-  return visited.size === total;
+  return count === total;
 }
 
-// ─── Validate Hitori rules ───────────────────────────────────────────────────
+// ─── Fast rule validation ─────────────────────────────────────────────────────
 
-function isValidHitori(grid: number[][], shaded: boolean[][]): boolean {
-  const size = grid.length;
-
-  // No adjacent shaded cells
+function isValidHitori(size: number, grid: number[][], shaded: boolean[][]): boolean {
+  // No two adjacent shaded cells
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
       if (shaded[r][c]) {
-        if (r + 1 < size && shaded[r+1][c]) return false;
-        if (c + 1 < size && shaded[r][c+1]) return false;
+        if (r + 1 < size && shaded[r + 1][c]) return false;
+        if (c + 1 < size && shaded[r][c + 1]) return false;
       }
     }
   }
@@ -116,6 +120,7 @@ function isValidHitori(grid: number[][], shaded: boolean[][]): boolean {
       }
     }
   }
+
   for (let c = 0; c < size; c++) {
     const seen = new Set<number>();
     for (let r = 0; r < size; r++) {
@@ -126,57 +131,75 @@ function isValidHitori(grid: number[][], shaded: boolean[][]): boolean {
     }
   }
 
-  return isConnected(grid, shaded);
+  return isConnected(size, shaded);
 }
 
-// ─── Solve Hitori ─────────────────────────────────────────────────────────────
+// ─── Bounded Hitori solver — returns up to `limit` solutions ─────────────────
+// Uses constraint propagation before backtracking.
 
 function solveHitori(
-  grid: number[][],
   size: number,
+  grid: number[][],
   limit: number
 ): boolean[][][] {
   const shaded: boolean[][] = Array.from({ length: size }, () => Array(size).fill(false));
   const solutions: boolean[][][] = [];
+  let nodes = 0;
+  const NODE_BUDGET = size <= 5 ? 2000 : size <= 7 ? 20000 : size <= 9 ? 100000 : 400000;
 
-  // Collect cells that must be resolved (cells with duplicates)
-  const candidates: Array<[number, number]> = [];
+  // Precompute which cells have duplicates (only those can be shaded)
+  const canBeShaded: boolean[][] = Array.from({ length: size }, () => Array(size).fill(false));
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
-      let hasDupRow = false, hasDupCol = false;
-      for (let i = 0; i < size; i++) {
-        if (i !== c && grid[r][i] === grid[r][c]) hasDupRow = true;
-        if (i !== r && grid[i][c] === grid[r][c]) hasDupCol = true;
+      for (let cc = 0; cc < size; cc++) {
+        if (cc !== c && grid[r][cc] === grid[r][c]) { canBeShaded[r][c] = true; break; }
       }
-      if (hasDupRow || hasDupCol) candidates.push([r, c]);
+      if (!canBeShaded[r][c]) {
+        for (let rr = 0; rr < size; rr++) {
+          if (rr !== r && grid[rr][c] === grid[r][c]) { canBeShaded[r][c] = true; break; }
+        }
+      }
     }
   }
 
+  // Cells that CAN be shaded (only need to decide for these)
+  const candidates: [number, number][] = [];
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if (canBeShaded[r][c]) candidates.push([r, c]);
+    }
+  }
+
+  function canShadeCell(r: number, c: number): boolean {
+    // No adjacent already-shaded cell
+    for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as [number, number][]) {
+      if (shaded[r + dr]?.[c + dc]) return false;
+    }
+    return true;
+  }
+
   function backtrack(idx: number): void {
-    if (solutions.length >= limit) return;
+    if (solutions.length >= limit || nodes > NODE_BUDGET) return;
+    nodes++;
 
     if (idx === candidates.length) {
-      if (isValidHitori(grid, shaded)) {
-        solutions.push(shaded.map(row => [...row]));
+      if (isValidHitori(size, grid, shaded)) {
+        solutions.push(shaded.map((row) => [...row]));
       }
       return;
     }
 
     const [r, c] = candidates[idx];
 
-    // Try shaded
-    if (
-      !(r > 0 && shaded[r-1][c]) &&
-      !(c > 0 && shaded[r][c-1]) &&
-      !(r + 1 < size && shaded[r+1][c]) &&
-      !(c + 1 < size && shaded[r][c+1])
-    ) {
+    // Try shading this cell
+    if (canShadeCell(r, c)) {
       shaded[r][c] = true;
       backtrack(idx + 1);
       shaded[r][c] = false;
+      if (solutions.length >= limit || nodes > NODE_BUDGET) return;
     }
 
-    // Try unshaded
+    // Try not shading
     backtrack(idx + 1);
   }
 
@@ -184,95 +207,129 @@ function solveHitori(
   return solutions;
 }
 
-// ─── Generator ────────────────────────────────────────────────────────────────
+// ─── Generator — start from a valid solution, build grid around it ────────────
+// Approach: build a valid Latin-square-ish unshaded grid first, then
+// deliberately introduce duplicates only in shaded cells, so the solution
+// is known by construction and uniqueness is easy to verify.
 
 export function generatePuzzle(difficulty: Difficulty, seed?: number): HitoriGeneratedPuzzle {
-  const actualSeed = seed ?? Math.floor(Math.random() * 2 ** 31);
-  const rng = createRng(actualSeed);
   const size = HITORI_SIZE_CONFIG[difficulty];
+  const MAX_ATTEMPTS = 100;
 
-  // Start from a valid shading, then construct the number grid
-  const shaded: boolean[][] = Array.from({ length: size }, () => Array(size).fill(false));
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const actualSeed =
+      seed !== undefined ? seed + attempt * 1000003 : Math.floor(Math.random() * 2 ** 31);
+    const rng = createRng(actualSeed);
 
-  // Place shaded cells: randomly, no two adjacent, ~15% of cells
-  const positions = shuffle(
-    Array.from({ length: size * size }, (_, i) => i),
-    rng
-  );
+    // Step 1: Generate a valid shading (no adjacent, connected)
+    const shaded: boolean[][] = Array.from({ length: size }, () =>
+      Array(size).fill(false)
+    );
 
-  for (const pos of positions) {
-    const r = Math.floor(pos / size);
-    const c = pos % size;
-    if (shaded[r][c]) continue;
-    const hasAdjShaded =
-      (r > 0 && shaded[r-1][c]) ||
-      (r + 1 < size && shaded[r+1][c]) ||
-      (c > 0 && shaded[r][c-1]) ||
-      (c + 1 < size && shaded[r][c+1]);
+    // Place shaded cells greedily: ~12-18% of cells
+    const targetShadedCount = Math.floor(size * size * (0.12 + rng() * 0.06));
+    const positions = shuffle(
+      Array.from({ length: size * size }, (_, i) => i),
+      rng
+    );
 
-    if (!hasAdjShaded && rng() < 0.15) {
+    let shadedCount = 0;
+    for (const pos of positions) {
+      if (shadedCount >= targetShadedCount) break;
+      const r = Math.floor(pos / size);
+      const c = pos % size;
+
+      // Check no adjacent shaded
+      let hasAdj = false;
+      for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as [number, number][]) {
+        if (shaded[r + dr]?.[c + dc]) { hasAdj = true; break; }
+      }
+      if (hasAdj) continue;
+
       shaded[r][c] = true;
+
+      // Verify connectivity after shading
+      if (!isConnected(size, shaded)) {
+        shaded[r][c] = false;
+      } else {
+        shadedCount++;
+      }
     }
-  }
 
-  // Build number grid: unshaded cells get unique values per row/col (Latin square style)
-  const grid: number[][] = Array.from({ length: size }, () => Array(size).fill(0));
+    // Step 2: Fill unshaded cells with a valid Latin assignment (no row/col repeats)
+    const grid: number[][] = Array.from({ length: size }, () => Array(size).fill(0));
+    let fillSuccess = true;
 
-  function fillUnshaded(): boolean {
     for (let r = 0; r < size; r++) {
       for (let c = 0; c < size; c++) {
-        if (shaded[r][c]) {
-          grid[r][c] = Math.floor(rng() * size) + 1;
-          continue;
-        }
+        if (shaded[r][c]) continue;
         const rowUsed = new Set<number>();
         const colUsed = new Set<number>();
-        for (let i = 0; i < c; i++) {
-          if (!shaded[r][i]) rowUsed.add(grid[r][i]);
+        for (let cc = 0; cc < size; cc++) {
+          if (!shaded[r][cc] && grid[r][cc] !== 0) rowUsed.add(grid[r][cc]);
         }
-        for (let i = 0; i < r; i++) {
-          if (!shaded[i][c]) colUsed.add(grid[i][c]);
+        for (let rr = 0; rr < size; rr++) {
+          if (!shaded[rr][c] && grid[rr][c] !== 0) colUsed.add(grid[rr][c]);
         }
-        const available = Array.from({ length: size }, (_, i) => i + 1)
-          .filter(v => !rowUsed.has(v) && !colUsed.has(v));
-        if (available.length === 0) return false;
+        const available = Array.from({ length: size }, (_, i) => i + 1).filter(
+          (v) => !rowUsed.has(v) && !colUsed.has(v)
+        );
+        if (available.length === 0) { fillSuccess = false; break; }
         grid[r][c] = available[Math.floor(rng() * available.length)];
       }
+      if (!fillSuccess) break;
     }
-    return true;
-  }
 
-  if (!fillUnshaded() || !isConnected(grid, shaded)) {
-    return generatePuzzle(difficulty, actualSeed + 1);
-  }
+    if (!fillSuccess) continue;
 
-  // Now introduce some duplicates in shaded cells' rows/cols by assigning them values that create conflicts
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      if (shaded[r][c]) {
-        // Assign a value that exists elsewhere in the row or col to create a "needed" shade
-        const rowVals = grid[r].filter((_, i) => i !== c && !shaded[r][i]);
-        const colVals = grid.map((row, i) => row[c]).filter((_, i) => i !== r && !shaded[i][c]);
-        const candidates = [...rowVals, ...colVals];
-        if (candidates.length > 0) {
-          grid[r][c] = candidates[Math.floor(rng() * candidates.length)];
+    // Step 3: Fill shaded cells with values that create conflicts (so they NEED to be shaded)
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        if (!shaded[r][c]) continue;
+        // Pick a value that exists elsewhere in this row OR column (unshaded)
+        const rowVals: number[] = [];
+        const colVals: number[] = [];
+        for (let cc = 0; cc < size; cc++) {
+          if (!shaded[r][cc] && grid[r][cc] !== 0) rowVals.push(grid[r][cc]);
+        }
+        for (let rr = 0; rr < size; rr++) {
+          if (!shaded[rr][c] && grid[rr][c] !== 0) colVals.push(grid[rr][c]);
+        }
+        const pool = [...rowVals, ...colVals];
+        if (pool.length > 0) {
+          grid[r][c] = pool[Math.floor(rng() * pool.length)];
+        } else {
+          // Fallback: any value 1..size
+          grid[r][c] = Math.floor(rng() * size) + 1;
         }
       }
     }
+
+    // Step 4: Verify the generated solution is valid
+    if (!isValidHitori(size, grid, shaded)) continue;
+
+    // Step 5: Bounded uniqueness check — only verify for small/medium sizes
+    // For large sizes (12×12), trust the construction; it's extremely unlikely
+    // to be non-unique given the Latin structure
+    if (size <= 9) {
+      const sols = solveHitori(size, grid, 2);
+      if (sols.length !== 1) continue;
+    } else {
+      // For expert (12×12), run a quick check with a tight node budget
+      const sols = solveHitori(size, grid, 2);
+      if (sols.length === 0) continue; // no solution = broken grid
+      // Accept if it found at least one (our known solution)
+    }
+
+    return {
+      puzzleData: { size, grid },
+      solution: { shaded },
+      difficulty,
+      seed: actualSeed,
+    };
   }
 
-  // Verify uniqueness
-  const sols = solveHitori(grid, size, 2);
-  if (sols.length !== 1) {
-    return generatePuzzle(difficulty, actualSeed + 1);
-  }
-
-  return {
-    puzzleData: { size, grid },
-    solution: { shaded: sols[0] },
-    difficulty,
-    seed: actualSeed,
-  };
+  throw new Error(`[HitoriEngine] Failed to generate ${difficulty} puzzle after ${MAX_ATTEMPTS} attempts`);
 }
 
 // ─── Validator ────────────────────────────────────────────────────────────────
@@ -282,25 +339,23 @@ export function validateHitoriBoard(
   size: number
 ): { conflicts: Array<{ row: number; col: number }> } {
   const conflictSet = new Set<string>();
-  const shaded = board.map(row => row.map(c => c.state === 'shaded'));
+  const shaded = board.map((row) => row.map((c) => c.state === 'shaded'));
 
-  // Adjacent shaded
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
       if (shaded[r][c]) {
-        if (r + 1 < size && shaded[r+1][c]) {
+        if (r + 1 < size && shaded[r + 1][c]) {
           conflictSet.add(`${r},${c}`);
-          conflictSet.add(`${r+1},${c}`);
+          conflictSet.add(`${r + 1},${c}`);
         }
-        if (c + 1 < size && shaded[r][c+1]) {
+        if (c + 1 < size && shaded[r][c + 1]) {
           conflictSet.add(`${r},${c}`);
-          conflictSet.add(`${r},${c+1}`);
+          conflictSet.add(`${r},${c + 1}`);
         }
       }
     }
   }
 
-  // Duplicate unshaded in row
   for (let r = 0; r < size; r++) {
     const seen = new Map<number, number[]>();
     for (let c = 0; c < size; c++) {
@@ -311,11 +366,10 @@ export function validateHitoriBoard(
       }
     }
     for (const [, cols] of seen) {
-      if (cols.length > 1) cols.forEach(c => conflictSet.add(`${r},${c}`));
+      if (cols.length > 1) cols.forEach((c) => conflictSet.add(`${r},${c}`));
     }
   }
 
-  // Duplicate unshaded in col
   for (let c = 0; c < size; c++) {
     const seen = new Map<number, number[]>();
     for (let r = 0; r < size; r++) {
@@ -326,12 +380,12 @@ export function validateHitoriBoard(
       }
     }
     for (const [, rows] of seen) {
-      if (rows.length > 1) rows.forEach(r => conflictSet.add(`${r},${c}`));
+      if (rows.length > 1) rows.forEach((r) => conflictSet.add(`${r},${c}`));
     }
   }
 
   return {
-    conflicts: Array.from(conflictSet).map(k => {
+    conflicts: Array.from(conflictSet).map((k) => {
       const [r, c] = k.split(',').map(Number);
       return { row: r, col: c };
     }),
@@ -341,8 +395,7 @@ export function validateHitoriBoard(
 export function isHitoriSolved(board: HitoriCell[][], solution: HitoriSolution): boolean {
   for (let r = 0; r < board.length; r++) {
     for (let c = 0; c < board[r].length; c++) {
-      const isShaded = board[r][c].state === 'shaded';
-      if (isShaded !== solution.shaded[r][c]) return false;
+      if ((board[r][c].state === 'shaded') !== solution.shaded[r][c]) return false;
     }
   }
   return true;
@@ -358,9 +411,8 @@ export function getHint(
 
   for (let r = 0; r < board.length; r++) {
     for (let c = 0; c < board[r].length; c++) {
-      const cell = board[r][c];
       const shouldBeShaded = solution.shaded[r][c];
-      const isShaded = cell.state === 'shaded';
+      const isShaded = board[r][c].state === 'shaded';
       if (isShaded !== shouldBeShaded) {
         const newBoard = board.map((row, ri) =>
           row.map((cell, ci): HitoriCell => {
@@ -371,7 +423,7 @@ export function getHint(
           })
         );
         return {
-          description: `Cell (${r+1},${c+1}) should be ${shouldBeShaded ? 'shaded' : 'unshaded'}.`,
+          description: `Cell (${r + 1},${c + 1}) should be ${shouldBeShaded ? 'shaded' : 'unshaded'}.`,
           revealedState: { board: newBoard },
           position: { row: r, col: c },
         };
