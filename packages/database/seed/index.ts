@@ -1,171 +1,137 @@
-import { PrismaClient, GameType, Difficulty } from '@prisma/client';
-import { SudokuEngine } from '@puzzle-roll/shared';
-import { generatePuzzle as generateQueens } from '../../../packages/shared/src/engines/queens';
-import { generatePuzzle as generateZip } from '../../../packages/shared/src/engines/zip';
-import { generatePuzzle as generateTango } from '../../../packages/shared/src/engines/tango';
-import { generatePuzzle as generateNonogram } from '../../../packages/shared/src/engines/nonogram';
-import { generatePuzzle as generateMinesweeper } from '../../../packages/shared/src/engines/minesweeper';
-import { generatePuzzle as generateKakuro } from '../../../packages/shared/src/engines/kakuro';
-import { generatePuzzle as generateLightUp } from '../../../packages/shared/src/engines/lightup';
-import { generatePuzzle as generateFutoshiki } from '../../../packages/shared/src/engines/futoshiki';
-import { generatePuzzle as generateHitori } from '../../../packages/shared/src/engines/hitori';
+import path from 'path';
+import dotenv from 'dotenv';
 
-const prisma = new PrismaClient();
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
-const PUZZLES_PER_DIFFICULTY = 20;
+import { PrismaClient, GameType, Difficulty } from '../prisma/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import {
+  SudokuEngine, generateQueens, generateZip, generateTango,
+  generateNonogram, generateMinesweeper, generateKakuro,
+  generateLightUp, generateFutoshiki, generateHitori,
+} from '@puzzle-roll/shared';
+import { SqlDriverAdapterFactory } from '@prisma/client/runtime/client';
+
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) throw new Error('[seed] DATABASE_URL is not set.');
+
+const adapter: SqlDriverAdapterFactory = new PrismaPg({ connectionString });
+const prisma = new PrismaClient({ adapter });
+
+const PUZZLES_PER_DIFFICULTY = 10;
 const DAILY_DAYS = 365;
+const PUZZLE_TIMEOUT_MS = 30_000;
 
 const GAME_TYPES: GameType[] = [
-  'sudoku', 'queens', 'zip', 'tango', 'nonogram',
-  'minesweeper', 'kakuro', 'light_up', 'futoshiki', 'hitori',
+  'sudoku','queens','zip','tango','nonogram',
+  'minesweeper','kakuro','light_up','futoshiki','hitori',
 ];
+const DIFFICULTIES: Difficulty[] = ['easy','medium','hard','expert'];
 
-const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard', 'expert'];
-
-type GeneratorFn = (difficulty: string, seed: number) => { puzzleData: unknown; solution: unknown; seed: number };
-
-const GENERATORS: Record<GameType, GeneratorFn> = {
-  sudoku: (d, s) => SudokuEngine.generatePuzzle(d as Parameters<typeof SudokuEngine.generatePuzzle>[0], s),
-  queens: (d, s) => generateQueens(d as Parameters<typeof generateQueens>[0], s),
-  zip: (d, s) => generateZip(d as Parameters<typeof generateZip>[0], s),
-  tango: (d, s) => generateTango(d as Parameters<typeof generateTango>[0], s),
-  nonogram: (d, s) => generateNonogram(d as Parameters<typeof generateNonogram>[0], s),
-  minesweeper: (d, s) => generateMinesweeper(d as Parameters<typeof generateMinesweeper>[0], s),
-  kakuro: (d, s) => generateKakuro(d as Parameters<typeof generateKakuro>[0], s),
-  light_up: (d, s) => generateLightUp(d as Parameters<typeof generateLightUp>[0], s),
-  futoshiki: (d, s) => generateFutoshiki(d as Parameters<typeof generateFutoshiki>[0], s),
-  hitori: (d, s) => generateHitori(d as Parameters<typeof generateHitori>[0], s),
+type GenFn = (d: string, s: number) => { puzzleData: unknown; solution: unknown; seed: number };
+const GENERATORS: Record<GameType, GenFn> = {
+  sudoku:      (d,s)=>SudokuEngine.generatePuzzle(d as Parameters<typeof SudokuEngine.generatePuzzle>[0],s),
+  queens:      (d,s)=>generateQueens(d as Parameters<typeof generateQueens>[0],s),
+  zip:         (d,s)=>generateZip(d as Parameters<typeof generateZip>[0],s),
+  tango:       (d,s)=>generateTango(d as Parameters<typeof generateTango>[0],s),
+  nonogram:    (d,s)=>generateNonogram(d as Parameters<typeof generateNonogram>[0],s),
+  minesweeper: (d,s)=>generateMinesweeper(d as Parameters<typeof generateMinesweeper>[0],s),
+  kakuro:      (d,s)=>generateKakuro(d as Parameters<typeof generateKakuro>[0],s),
+  light_up:    (d,s)=>generateLightUp(d as Parameters<typeof generateLightUp>[0],s),
+  futoshiki:   (d,s)=>generateFutoshiki(d as Parameters<typeof generateFutoshiki>[0],s),
+  hitori:      (d,s)=>generateHitori(d as Parameters<typeof generateHitori>[0],s),
 };
 
-function getStartDate(): Date {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  return d;
+async function tryGenerate(gameType: GameType, difficulty: string, seed: number) {
+  return new Promise<{ puzzleData: unknown; solution: unknown; seed: number } | null>((resolve) => {
+    const t = setTimeout(() => { console.warn(`    ⏱  Timeout: ${gameType} ${difficulty}`); resolve(null); }, PUZZLE_TIMEOUT_MS);
+    try { const r = GENERATORS[gameType](difficulty, seed); clearTimeout(t); resolve(r); }
+    catch (e) { clearTimeout(t); console.error(`    ⚠️  ${e instanceof Error ? e.message : e}`); resolve(null); }
+  });
 }
 
-function toISODate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+function toISO(date: Date) { return date.toISOString().slice(0,10); }
 
 async function seedPuzzles(): Promise<Map<string, string[]>> {
-  console.log('🎲 Generating puzzles...');
-  const puzzleIdMap = new Map<string, string[]>();
+  console.log('🎲 Generating puzzles...\n');
+  const map = new Map<string, string[]>();
 
   for (const gameType of GAME_TYPES) {
     for (const difficulty of DIFFICULTIES) {
       const key = `${gameType}:${difficulty}`;
-      const ids: string[] = [];
-      console.log(`  Generating ${PUZZLES_PER_DIFFICULTY} ${difficulty} ${gameType} puzzles...`);
+      console.log(`  ▶ ${key}`);
+      const batch: { gameType: GameType; difficulty: Difficulty; puzzleData: object; solution: object; seed: number }[] = [];
 
       for (let i = 0; i < PUZZLES_PER_DIFFICULTY; i++) {
-        const seed = parseInt(`${Date.now()}${i}`.slice(-9)) + i * 997 + GAME_TYPES.indexOf(gameType) * 10000 + DIFFICULTIES.indexOf(difficulty) * 100000;
-        
-        let puzzleData: unknown;
-        let solution: unknown;
-        let actualSeed: number;
-
-        try {
-          const result = GENERATORS[gameType](difficulty, seed);
-          puzzleData = result.puzzleData;
-          solution = result.solution;
-          actualSeed = result.seed;
-        } catch (err) {
-          console.error(`    ⚠️  Failed to generate ${gameType} ${difficulty} #${i}: ${err}`);
-          continue;
-        }
-
-        const puzzle = await prisma.gamePuzzle.create({
-          data: {
-            gameType: gameType as GameType,
-            difficulty: difficulty as Difficulty,
-            puzzleData: puzzleData as object,
-            solution: solution as object,
-            seed: actualSeed!,
-          },
-        });
-
-        ids.push(puzzle.id);
+        const seed = Math.abs(Math.floor(Date.now() / 1000)) + i * 997 + GAME_TYPES.indexOf(gameType) * 10_000 + DIFFICULTIES.indexOf(difficulty) * 100_000;
+        const label = `    [${i+1}/${PUZZLES_PER_DIFFICULTY}] ${gameType}-${difficulty}`;
+        console.time(label);
+        const r = await tryGenerate(gameType, difficulty, seed);
+        if (r) batch.push({ gameType, difficulty, puzzleData: r.puzzleData as object, solution: r.solution as object, seed: r.seed });
+        console.timeEnd(label);
       }
 
-      puzzleIdMap.set(key, ids);
-      console.log(`  ✅ ${gameType} ${difficulty}: ${ids.length} puzzles created`);
+      if (batch.length === 0) { console.warn(`  ⚠️  Zero puzzles for ${key}\n`); map.set(key, []); continue; }
+
+      const ids: string[] = [];
+      for (const row of batch) {
+        const c = await prisma.gamePuzzle.create({ data: row, select: { id: true } });
+        ids.push(c.id);
+      }
+      map.set(key, ids);
+      console.log(`  ✅ ${key}: ${ids.length} puzzles\n`);
     }
   }
-
-  return puzzleIdMap;
+  return map;
 }
 
-async function seedDailyPuzzles(puzzleIdMap: Map<string, string[]>): Promise<void> {
-  console.log('\n📅 Assigning daily puzzles for 365 days...');
+async function seedDaily(map: Map<string, string[]>) {
+  console.log(`📅 Assigning ${DAILY_DAYS} days of daily puzzles...\n`);
+  const start = new Date(); start.setUTCHours(0,0,0,0);
+  const used = new Map<string, number>();
+  const rota: Difficulty[] = ['medium','hard','medium','easy','hard','expert'];
 
-  const startDate = getStartDate();
-  const usedIndices = new Map<string, number>();
+  for (let d = 0; d < DAILY_DAYS; d++) {
+    const dt = new Date(start); dt.setUTCDate(dt.getUTCDate() + d);
+    const dateStr = toISO(dt);
+    const diff = rota[d % rota.length];
 
-  for (let dayOffset = 0; dayOffset < DAILY_DAYS; dayOffset++) {
-    const date = new Date(startDate);
-    date.setUTCDate(date.getUTCDate() + dayOffset);
-    const dateStr = toISODate(date);
-
-    for (const gameType of GAME_TYPES) {
-      // Cycle through all difficulties but bias towards medium/hard for daily
-      const dailyDifficulties: Difficulty[] = ['medium', 'hard', 'medium', 'hard', 'easy', 'expert'];
-      const difficulty = dailyDifficulties[dayOffset % dailyDifficulties.length];
-      const key = `${gameType}:${difficulty}`;
-      const ids = puzzleIdMap.get(key) ?? [];
-
+    for (const gt of GAME_TYPES) {
+      let key = `${gt}:${diff}`;
+      let ids = map.get(key) ?? [];
+      // Fall back to any available difficulty for this game
       if (ids.length === 0) {
-        console.warn(`  ⚠️  No puzzles for ${key}`);
-        continue;
+        const fallback = DIFFICULTIES.map(fd=>`${gt}:${fd}`).find(k=>(map.get(k)?.length??0)>0);
+        if (!fallback) continue;
+        key = fallback; ids = map.get(key)!;
       }
-
-      const currentIdx = usedIndices.get(key) ?? 0;
-      const puzzleId = ids[currentIdx % ids.length];
-      usedIndices.set(key, currentIdx + 1);
-
+      const idx = used.get(key) ?? 0;
       await prisma.dailyPuzzle.upsert({
-        where: { gameType_date: { gameType: gameType as GameType, date: dateStr } },
-        create: {
-          gameType: gameType as GameType,
-          date: dateStr,
-          puzzleId,
-        },
-        update: { puzzleId },
+        where: { gameType_date: { gameType: gt, date: dateStr } },
+        create: { gameType: gt, date: dateStr, puzzleId: ids[idx % ids.length] },
+        update: { puzzleId: ids[idx % ids.length] },
       });
+      used.set(key, idx + 1);
     }
-
-    if (dayOffset % 30 === 0) {
-      console.log(`  ✅ Assigned daily puzzles through day ${dayOffset + 1}`);
-    }
+    if (d % 30 === 0) console.log(`  ✅ Day ${d+1} assigned`);
   }
-
-  console.log(`  ✅ ${DAILY_DAYS} days × ${GAME_TYPES.length} games = ${DAILY_DAYS * GAME_TYPES.length} daily puzzle assignments`);
+  console.log(`\n  ✅ Complete`);
 }
 
-async function main(): Promise<void> {
-  console.log('🌱 Starting Puzzle Roll seed...\n');
-
-  // Clear existing data
-  console.log('🧹 Clearing existing puzzle data...');
+async function main() {
+  console.log('🌱 Puzzle Roll seed starting...\n');
+  console.log('🧹 Clearing existing data...');
   await prisma.gameCompletion.deleteMany();
   await prisma.dailyPuzzle.deleteMany();
   await prisma.gamePuzzle.deleteMany();
+  console.log('   Done.\n');
 
-  const puzzleIdMap = await seedPuzzles();
-  await seedDailyPuzzles(puzzleIdMap);
+  const map = await seedPuzzles();
+  await seedDaily(map);
 
-  const totalPuzzles = await prisma.gamePuzzle.count();
-  const totalDaily = await prisma.dailyPuzzle.count();
-
-  console.log(`\n✨ Seed complete!`);
-  console.log(`   ${totalPuzzles} puzzles created`);
-  console.log(`   ${totalDaily} daily puzzle assignments created`);
+  console.log(`\n✨ Done! ${await prisma.gamePuzzle.count()} puzzles, ${await prisma.dailyPuzzle.count()} daily assignments.`);
 }
 
 main()
-  .catch((e) => {
-    console.error('❌ Seed failed:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .catch(e => { console.error('❌', e); process.exit(1); })
+  .finally(() => prisma.$disconnect());

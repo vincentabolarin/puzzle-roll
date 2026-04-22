@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/minesweeper';
+export { generateMinesweeper } from '@puzzle-roll/shared';

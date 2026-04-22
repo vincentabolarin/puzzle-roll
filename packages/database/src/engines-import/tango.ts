@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/tango';
+export { generateTango } from '@puzzle-roll/shared';

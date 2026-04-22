@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { prisma } from '@puzzle-roll/database';
 import { GetPuzzlesQueryDto } from './puzzles.dto';
+import { GameType } from '@puzzle-roll/shared';
+import { PrismaService } from '../common/prisma/prisma.service';
 
 function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
@@ -8,12 +9,13 @@ function todayUTC(): string {
 
 @Injectable()
 export class PuzzlesService {
-  async getDailyPuzzle(gameType: string) {
+  constructor(private readonly prisma: PrismaService) {}
+  async getDailyPuzzle(gameType: GameType) {
     const date = todayUTC();
-    const daily = await prisma.dailyPuzzle.findUnique({
+    const daily = await this.prisma.dailyPuzzle.findUnique({
       where: {
         gameType_date: {
-          gameType: gameType as Parameters<typeof prisma.dailyPuzzle.findUnique>[0]['where']['gameType_date']['gameType'],
+          gameType: gameType,
           date,
         },
       },
@@ -38,17 +40,17 @@ export class PuzzlesService {
     };
   }
 
-  async getPuzzles(gameType: string, query: GetPuzzlesQueryDto) {
+  async getPuzzles(gameType: GameType, query: GetPuzzlesQueryDto) {
     const { difficulty, page = 1, limit = 20 } = query;
     const skip = (page - 1) * limit;
 
     const where = {
-      gameType: gameType as Parameters<typeof prisma.gamePuzzle.findMany>[0]['where']['gameType'],
-      ...(difficulty ? { difficulty: difficulty as Parameters<typeof prisma.gamePuzzle.findMany>[0]['where']['difficulty'] } : {}),
+      gameType: gameType,
+      ...(difficulty ? { difficulty: difficulty } : {}),
     };
 
-    const [puzzles, total] = await prisma.$transaction([
-      prisma.gamePuzzle.findMany({
+    const [puzzles, total] = await this.prisma.$transaction([
+      this.prisma.gamePuzzle.findMany({
         where,
         skip,
         take: limit,
@@ -62,7 +64,7 @@ export class PuzzlesService {
           // solution intentionally excluded
         },
       }),
-      prisma.gamePuzzle.count({ where }),
+      this.prisma.gamePuzzle.count({ where }),
     ]);
 
     return {
@@ -75,7 +77,7 @@ export class PuzzlesService {
   }
 
   async getPuzzleById(id: string, includeSolution = false) {
-    const puzzle = await prisma.gamePuzzle.findUnique({
+    const puzzle = await this.prisma.gamePuzzle.findUnique({
       where: { id },
       select: {
         id: true,
@@ -92,7 +94,7 @@ export class PuzzlesService {
   }
 
   async getPuzzleSolution(id: string) {
-    const puzzle = await prisma.gamePuzzle.findUnique({
+    const puzzle = await this.prisma.gamePuzzle.findUnique({
       where: { id },
       select: { id: true, solution: true },
     });
@@ -100,10 +102,10 @@ export class PuzzlesService {
     return puzzle;
   }
 
-  async getAllDailyPuzzles(gameType: string, limit = 30) {
-    const dailies = await prisma.dailyPuzzle.findMany({
+  async getAllDailyPuzzles(gameType: GameType, limit = 30) {
+    const dailies = await this.prisma.dailyPuzzle.findMany({
       where: {
-        gameType: gameType as Parameters<typeof prisma.dailyPuzzle.findMany>[0]['where']['gameType'],
+        gameType: gameType,
         date: { lte: todayUTC() },
       },
       orderBy: { date: 'desc' },

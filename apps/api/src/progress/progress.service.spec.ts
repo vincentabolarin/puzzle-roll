@@ -63,7 +63,7 @@ describe('ProgressService', () => {
 
       const result = await service.completeGame('user_1', MOCK_COMPLETION_DTO);
       expect(result.id).toBe('completion_1');
-      expect(mockUsersService.upsertStats).toHaveBeenCalledOnce?.();
+      expect(mockUsersService.upsertStats).toHaveBeenCalledTimes(1);
     });
 
     it('throws NotFoundException for unknown puzzle', async () => {

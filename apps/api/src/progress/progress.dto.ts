@@ -16,19 +16,19 @@ import { Difficulty, GameType } from '@puzzle-roll/shared';
 export class CompleteGameDto {
   @ApiProperty()
   @IsString()
-  puzzleId: string;
+  puzzleId!: string;
 
   @ApiProperty({ enum: GameType })
   @IsEnum(GameType)
-  gameType: GameType;
+  gameType!: GameType;
 
   @ApiProperty({ enum: Difficulty })
   @IsEnum(Difficulty)
-  difficulty: Difficulty;
+  difficulty!: Difficulty;
 
   @ApiProperty()
   @IsBoolean()
-  isDaily: boolean;
+  isDaily!: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -38,16 +38,16 @@ export class CompleteGameDto {
   @ApiProperty({ description: 'Elapsed time in seconds' })
   @IsInt()
   @Min(1)
-  elapsedSeconds: number;
+  elapsedSeconds!: number;
 
   @ApiProperty()
   @IsInt()
   @Min(0)
-  hintsUsed: number;
+  hintsUsed!: number;
 
   @ApiProperty()
   @IsISO8601()
-  completedAt: string;
+  completedAt!: string;
 
   @ApiPropertyOptional({ description: 'Wordle-style emoji share string' })
   @IsOptional()
@@ -60,5 +60,5 @@ export class SyncProgressDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CompleteGameDto)
-  completions: CompleteGameDto[];
+  completions!: CompleteGameDto[];
 }

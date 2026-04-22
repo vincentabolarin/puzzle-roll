@@ -42,7 +42,7 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://puzzleroll:puzzleroll@postgres:5432/puzzleroll
+      DATABASE_URL: postgresql://vincent:P@ssw0rd_Pass123$@localhost:5432/puzzle_roll
       REDIS_URL: redis://redis:6379
       JWT_SECRET: dev-jwt-secret-change-in-production
       JWT_REFRESH_SECRET: dev-refresh-secret-change-in-production
