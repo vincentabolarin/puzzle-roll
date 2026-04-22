@@ -42,7 +42,7 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
   // Cell fills 90% of screen width, minimum 36px
   const CELL = Math.max(36, Math.min(Math.floor((width * 0.9) / size), 72));
   // Constraint badge is 30% of cell size, min 16px
-  const CON_SIZE = Math.max(16, Math.floor(CELL * 0.30));
+  const CON_SIZE = Math.max(20, Math.floor(CELL * 0.42));
 
   function buildInitial(): TangoState { return { board: given.map(r => [...r]) }; }
 
@@ -155,8 +155,8 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
                         width: CON_SIZE, height: CON_SIZE, borderRadius: CON_SIZE / 2,
                         backgroundColor: conBg,
                       }]}>
-                        <Text style={[styles.conText, { color: conText, fontSize: CON_SIZE * 0.55 }]}>
-                          {hCon === '=' ? '=' : '✕'}
+                        <Text style={[styles.conText, { color: conText, fontSize: CON_SIZE * 0.75 }]}>
+                          {hCon === '=' ? '=' : '×'}
                         </Text>
                       </View>
                     )}
@@ -169,8 +169,8 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
                         backgroundColor: conBg,
                         zIndex: 10,
                       }]}>
-                        <Text style={[styles.conText, { color: conText, fontSize: CON_SIZE * 0.55 }]}>
-                          {vCon === '=' ? '=' : '✕'}
+                        <Text style={[styles.conText, { color: conText, fontSize: CON_SIZE * 0.75 }]}>
+                          {vCon === '=' ? '=' : '×'}
                         </Text>
                       </View>
                     )}

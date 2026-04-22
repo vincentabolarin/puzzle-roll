@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, useWindowDimensions, PanResponder, Animated } from 'react-native';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { View, Text, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
 import { TouchableOpacity } from 'react-native';
 import { useMutation } from '@tanstack/react-query';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
@@ -17,12 +17,42 @@ import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
 
-// Vibrant colours — one per region index
+// Fully opaque solid region colours — no transparency
+// const REGION_COLORS = [
+//   '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
+//   '#ef4444', '#8b5cf6', '#14b8a6', '#f97316', '#84cc16',
+//   '#06b6d4', '#a855f7',
+// ];
+
 const REGION_COLORS = [
-  '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
-  '#ef4444', '#8b5cf6', '#14b8a6', '#f97316', '#84cc16',
-  '#06b6d4', '#a855f7',
+  '#a5b4fc', // indigo (was #6366f1)
+  '#f9a8d4', // pink (was #ec4899)
+  '#fcd34d', // amber (was #f59e0b)
+  '#6ee7b7', // green (was #10b981)
+  '#93c5fd', // blue (was #3b82f6)
+  '#fca5a5', // red (was #ef4444)
+  '#c4b5fd', // purple (was #8b5cf6)
+  '#5eead4', // teal (was #14b8a6)
+  '#fdba74', // orange (was #f97316)
+  '#bef264', // lime (was #84cc16)
+  '#67e8f9', // cyan (was #06b6d4)
+  '#d8b4fe', // violet (was #a855f7)
 ];
+
+// const REGION_COLORS = [
+//   '#e0e7ff',
+//   '#fce7f3',
+//   '#fef3c7',
+//   '#d1fae5',
+//   '#dbeafe',
+//   '#fee2e2',
+//   '#ede9fe',
+//   '#ccfbf1',
+//   '#ffedd5',
+//   '#ecfccb',
+//   '#cffafe',
+//   '#f3e8ff',
+// ];
 
 interface QueensPuzzleData { size: number; regions: number[][] }
 type Mark = 'empty' | 'x' | 'queen';
@@ -46,10 +76,30 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   const pd = puzzleData as QueensPuzzleData;
   const { size, regions } = pd;
-  // Fill ~90% of screen width
   const CELL = Math.min(Math.floor((width * 0.92) / size), 52);
+
+  // ── Refs for PanResponder — NEVER read state/props inside handlers ──────────
+  // All mutable game state accessed inside PanResponder must live in refs,
+  // updated by useEffect, to avoid stale closures.
   const boardRef = useRef<View>(null);
   const boardOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const gameStateRef = useRef<QueensState | null>(null);
+  const isPausedRef = useRef(false);
+  const isSolvedRef = useRef(false);
+  const cellSizeRef = useRef(CELL);
+  const sizeRef = useRef(size);
+  const dragBoardRef = useRef<Mark[][] | null>(null);
+  const draggedCellsRef = useRef<Set<string>>(new Set());
+
+  // Keep refs in sync
+  useEffect(() => {
+    const gs = session?.currentState as QueensState | undefined;
+    gameStateRef.current = gs ?? null;
+  }, [session?.currentState]);
+  useEffect(() => { isPausedRef.current = session?.isPaused ?? false; }, [session?.isPaused]);
+  useEffect(() => { isSolvedRef.current = isSolved; }, [isSolved]);
+  useEffect(() => { cellSizeRef.current = CELL; }, [CELL]);
+  useEffect(() => { sizeRef.current = size; }, [size]);
 
   function buildInitial(): QueensState {
     return { board: Array.from({ length: size }, () => Array(size).fill('empty')) };
@@ -126,46 +176,71 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     }
   }
 
-  // Tap: empty → x → queen → empty
+  // Single-tap cycle: empty → x → queen → empty
+  // TouchableOpacity onPress fires cleanly without PanResponder interference
+  // because PanResponder only activates after 8px movement.
   const handleCellTap = useCallback(async (r: number, c: number) => {
     if (!gameState || isPaused || isSolved) return;
     lightImpact(); playSound('cell_tap');
-    const nb = gameState.board.map(row => [...row]);
+    const nb = gameState.board.map(row => [...row]) as Mark[][];
     const cur = nb[r][c];
     nb[r][c] = cur === 'empty' ? 'x' : cur === 'x' ? 'queen' : 'empty';
     await afterMove(nb);
   }, [gameState, isPaused, isSolved, lightImpact]);
 
-  // Drag: marks cells as 'x' while finger moves
-  const dragBoardRef = useRef<Mark[][] | null>(null);
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        if (!gameState || isPaused || isSolved) return;
-        dragBoardRef.current = gameState.board.map(row => [...row]);
-        const { pageX, pageY } = e.nativeEvent;
-        const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
-        const c = Math.floor((pageX - boardOriginRef.current.x) / CELL);
-        if (r >= 0 && r < size && c >= 0 && c < size) {
-          dragBoardRef.current[r][c] = 'x';
-          useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
-        }
-      },
-      onPanResponderMove: (e) => {
-        if (!dragBoardRef.current || isPaused || isSolved) return;
-        const { pageX, pageY } = e.nativeEvent;
-        const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
-        const c = Math.floor((pageX - boardOriginRef.current.x) / CELL);
-        if (r >= 0 && r < size && c >= 0 && c < size && dragBoardRef.current[r][c] === 'empty') {
-          dragBoardRef.current[r][c] = 'x';
-          useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
-        }
-      },
-      onPanResponderRelease: () => { dragBoardRef.current = null; },
-    })
-  ).current;
+  // PanResponder: ONLY activates for drag (>8px movement).
+  // All state is read through refs — no stale closure issues.
+  const panResponder = useMemo(() => PanResponder.create({
+    // Don't steal single-tap from TouchableOpacity
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, g) => {
+      const dist = Math.sqrt(g.dx * g.dx + g.dy * g.dy);
+      return dist > 8 && !isPausedRef.current && !isSolvedRef.current;
+    },
+
+    onPanResponderGrant: (e) => {
+      if (isPausedRef.current || isSolvedRef.current) return;
+      const currentState = gameStateRef.current;
+      if (!currentState) return;
+      dragBoardRef.current = currentState.board.map(row => [...row]) as Mark[][];
+      draggedCellsRef.current = new Set();
+      // Measure board origin now
+      boardRef.current?.measure((_x, _y, _w, _h, px, py) => {
+        boardOriginRef.current = { x: px, y: py };
+      });
+    },
+
+    onPanResponderMove: (e) => {
+      if (!dragBoardRef.current || isPausedRef.current || isSolvedRef.current) return;
+      const { pageX, pageY } = e.nativeEvent;
+      const CELL = cellSizeRef.current;
+      const sz = sizeRef.current;
+      const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
+      const c = Math.floor((pageX - boardOriginRef.current.x) / CELL);
+      if (r < 0 || r >= sz || c < 0 || c >= sz) return;
+      const key = `${r},${c}`;
+      if (draggedCellsRef.current.has(key)) return;
+      draggedCellsRef.current.add(key);
+      // Only mark empty cells as X during drag — never overwrite queens
+      if (dragBoardRef.current[r][c] === 'empty') {
+        dragBoardRef.current[r][c] = 'x';
+        // Use getState() to avoid stale updateState closure
+        useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
+      }
+    },
+
+    onPanResponderRelease: () => {
+      if (dragBoardRef.current) {
+        useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, true);
+      }
+      dragBoardRef.current = null;
+      draggedCellsRef.current = new Set();
+    },
+    onPanResponderTerminate: () => {
+      dragBoardRef.current = null;
+      draggedCellsRef.current = new Set();
+    },
+  }), []); // created once — all state via refs
 
   const handleHint = useCallback(async () => {
     if (!gameState || isPaused) return;
@@ -173,7 +248,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     for (const { row, col } of sol.queenPositions) {
       if (gameState.board[row][col] !== 'queen') {
-        const nb = gameState.board.map(r => [...r]); nb[row][col] = 'queen';
+        const nb = gameState.board.map(r => [...r]) as Mark[][]; nb[row][col] = 'queen';
         lightImpact(); playSound('hint'); updateState({ board: nb }); return;
       }
     }
@@ -192,31 +267,36 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 10, textAlign: 'center' }}>
             Tap: × then 👑. Drag to mark multiple cells ×.
           </Text>
-          <View
-            ref={boardRef}
-            onLayout={() => { boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; }); }}
-            {...panResponder.panHandlers}
-          >
-            {board.map((row, r) => (
-              <View key={r} style={{ flexDirection: 'row' }}>
-                {row.map((cell, c) => {
-                  const regionColor = REGION_COLORS[regions[r][c] % REGION_COLORS.length];
-                  const borderColor = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
-                  return (
-                    <TouchableOpacity
-                      key={c}
-                      onPress={() => handleCellTap(r, c)}
-                      disabled={isPaused}
-                      style={[styles.cell, { width: CELL, height: CELL, backgroundColor: regionColor + 'bb', borderColor }]}
-                      activeOpacity={0.7}
-                    >
-                      {cell === 'queen' && <Text style={{ fontSize: CELL * 0.52 }}>👑</Text>}
-                      {cell === 'x' && <Text style={{ fontSize: CELL * 0.52, color: '#ffffff', fontFamily: 'SpaceGrotesk-Bold' }}>×</Text>}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            ))}
+          {/* panHandlers on outer wrapper — NOT on the grid View itself to avoid layout conflicts */}
+          <View {...panResponder.panHandlers}>
+            <View
+              ref={boardRef}
+              onLayout={() => {
+                boardRef.current?.measure((_x, _y, _w, _h, px, py) => {
+                  boardOriginRef.current = { x: px, y: py };
+                });
+              }}
+            >
+              {board.map((row, r) => (
+                <View key={r} style={{ flexDirection: 'row' }}>
+                  {row.map((cell, c) => {
+                    const regionColor = REGION_COLORS[regions[r][c] % REGION_COLORS.length];
+                    return (
+                      <TouchableOpacity
+                        key={c}
+                        onPress={() => handleCellTap(r, c)}
+                        disabled={isPaused}
+                        style={[styles.cell, { width: CELL, height: CELL, backgroundColor: regionColor }]}
+                        activeOpacity={0.75}
+                      >
+                        {cell === 'queen' && <Text style={{ fontSize: CELL * 0.52 }}>👑</Text>}
+                        {cell === 'x' && <Text style={{ fontSize: CELL * 0.52, color: 'rgba(0,0,0,0.65)', fontFamily: 'SpaceGrotesk-Bold' }}>×</Text>}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
           </View>
         </View>
       </GenericGameScreen>
@@ -235,5 +315,5 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 }
 
 const styles = StyleSheet.create({
-  cell: { borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  cell: { borderWidth: 0.5, borderColor: 'rgba(0,0,0,0.18)', alignItems: 'center', justifyContent: 'center' },
 });

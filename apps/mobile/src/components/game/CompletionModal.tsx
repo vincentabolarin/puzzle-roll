@@ -11,6 +11,7 @@ interface CompletionModalProps {
   isDaily: boolean;
   shareableResult: string;
   onClose: () => void;
+  onNextPuzzle?: () => void;
 }
 
 function formatTime(s: number): string {
@@ -24,7 +25,7 @@ const GAME_LABELS: Partial<Record<GameType, string>> = {
   [GameType.LIGHT_UP]: 'Light Up', [GameType.FUTOSHIKI]: 'Futoshiki', [GameType.HITORI]: 'Hitori',
 };
 
-export default function CompletionModal({ gameType, elapsedSeconds, hintsUsed, isDaily, shareableResult, onClose }: CompletionModalProps) {
+export default function CompletionModal({ gameType, elapsedSeconds, hintsUsed, isDaily, shareableResult, onClose, onNextPuzzle }: CompletionModalProps) {
   const t = useAppTheme();
   const scale = useSharedValue(0.8);
   const opacity = useSharedValue(0);
@@ -72,6 +73,15 @@ export default function CompletionModal({ gameType, elapsedSeconds, hintsUsed, i
           )}
 
           <View style={styles.actions}>
+            {onNextPuzzle && (
+              <TouchableOpacity
+                onPress={onNextPuzzle}
+                style={styles.nextBtn}
+                accessibilityLabel="Next puzzle"
+              >
+                <Text style={styles.primaryBtnText}>Next puzzle →</Text>
+              </TouchableOpacity>
+            )}
             {isDaily && (
               <TouchableOpacity onPress={handleShare} style={styles.primaryBtn} accessibilityLabel="Share result">
                 <Text style={styles.primaryBtnText}>Share result</Text>
@@ -105,6 +115,7 @@ const styles = StyleSheet.create({
   sharePreview: { borderRadius: 12, padding: 14, marginBottom: 20 },
   shareText: { fontFamily: 'JetBrainsMono-Regular', fontSize: 12, lineHeight: 18 },
   actions: { gap: 10 },
+  nextBtn: { backgroundColor: '#6366f1', borderRadius: 16, paddingVertical: 15, alignItems: 'center' },
   primaryBtn: { backgroundColor: '#6366f1', borderRadius: 16, paddingVertical: 15, alignItems: 'center' },
   primaryBtnText: { color: '#fff', fontFamily: 'SpaceGrotesk-Bold', fontSize: 16 },
   secondaryBtn: { borderRadius: 16, paddingVertical: 15, alignItems: 'center', borderWidth: 1 },

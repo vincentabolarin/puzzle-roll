@@ -26,12 +26,15 @@ export default function HintButton({ hintsRemaining, onPress, disabled }: HintBu
       accessibilityLabel={hasHints ? `Hint — ${hintsRemaining} left` : 'Watch ad for hint'}
       accessibilityRole="button"
     >
-      {/* Horizontal layout: icon → count — matches other action buttons */}
-      <Text style={styles.icon}>💡</Text>
-      <Text style={[styles.count, { color: hasHints ? t.textPrimary : '#fbbf24' }]}>
-        {hasHints ? hintsRemaining : '+'}
-      </Text>
-      <Text style={[styles.label, { color: t.textMuted }]}>Hint</Text>
+      {/* Row 1: icon + count side by side */}
+      <View style={styles.topRow}>
+        <Text style={styles.icon}>💡</Text>
+        <Text style={[styles.count, { color: hasHints ? t.textPrimary : '#fbbf24' }]}>
+          {hasHints ? hintsRemaining : '+'}
+        </Text>
+      </View>
+      {/* Row 2: label */}
+      {/* <Text style={[styles.label, { color: t.textMuted }]}>Hint</Text> */}
     </TouchableOpacity>
   );
 }
@@ -48,7 +51,12 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderWidth: 1,
   },
-  icon: { fontSize: 14, lineHeight: 17 },
-  count: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 13, lineHeight: 16 },
-  label: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 9, lineHeight: 12 },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  icon: { fontSize: 14 },
+  count: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 13 },
+  label: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 9, lineHeight: 13, marginTop: 1 },
 });

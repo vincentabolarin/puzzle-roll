@@ -33,48 +33,96 @@ interface SudokuGameProps {
 
 type SudokuDigit = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
-function buildInitialBoard(puzzleGrid: SudokuEngine.SudokuGrid): SudokuEngine.SudokuBoardState {
+// Extended cell state: isWrongEntry = the cell the player just typed (red bg)
+// isError = victim cells that conflict with it (red text only)
+interface ExtendedCellState extends SudokuEngine.SudokuCellState {
+  isWrongEntry?: boolean;
+}
+
+type ExtendedBoard = ExtendedCellState[][];
+
+function buildInitialBoard(puzzleGrid: SudokuEngine.SudokuGrid): ExtendedBoard {
   return puzzleGrid.map((row) =>
-    row.map((val): SudokuEngine.SudokuCellState => ({
-      value: val, isGiven: val !== 0, isError: false, notes: new Set(),
+    row.map((val): ExtendedCellState => ({
+      value: val, isGiven: val !== 0, isError: false, isWrongEntry: false, notes: new Set(),
     }))
   );
 }
 
+/**
+ * Reconstruct notes Sets after JSON deserialisation through AsyncStorage.
+ * JSON.stringify turns Set → {}, so we must convert back on restore.
+ */
+function deserialiseBoardNotes(rawBoard: ExtendedCellState[][]): ExtendedBoard {
+  return rawBoard.map((row) =>
+    row.map((cell) => {
+      const rawNotes = Array.isArray(cell.notes)
+        ? cell.notes
+        : Object.values(cell.notes ?? {});
+
+      return {
+        ...cell,
+        isWrongEntry: false,
+        notes: new Set<SudokuDigit>(rawNotes as SudokuDigit[]),
+      };
+    })
+  );
+}
+
 function CellView({
-  cell, row, col, isSelected, isHighlighted, isConflict, cellSize, onPress, isDark,
+  cell, row, col, isSelected, isHighlighted, cellSize, onPress, isDark,
 }: {
-  cell: SudokuEngine.SudokuCellState;
+  cell: ExtendedCellState;
   row: number; col: number;
-  isSelected: boolean; isHighlighted: boolean; isConflict: boolean;
+  isSelected: boolean; isHighlighted: boolean;
   cellSize: number; onPress: () => void; isDark: boolean;
 }) {
-  const isBoxRight = col === 2 || col === 5;
-  const isBoxBottom = row === 2 || row === 5;
   const noteSize = Math.max(9, cellSize * 0.22);
   const digitSize = Math.max(18, cellSize * 0.52);
 
-  const bgColor = isSelected ? '#6366f1'
-    : isConflict ? (isDark ? '#7f1d1d' : '#fee2e2')
-    : isHighlighted ? (isDark ? '#1f2937' : '#e0e7ff')
+  const bgColor = isSelected
+    ? '#6366f1'
+    : cell.isWrongEntry
+    ? (isDark ? '#7f1d1d' : '#fee2e2')
+    : isHighlighted
+    ? (isDark ? '#1f2937' : '#e0e7ff')
     : 'transparent';
 
-  // When selected, always use white so digit is visible on indigo background.
-  // When conflict, use red. When given, use primary text. When user-placed, use accent.
-  const digitColor = isSelected ? '#ffffff'
-    : isConflict ? '#ef4444'
-    : cell.isGiven ? (isDark ? '#f9fafb' : '#111827')
+  const digitColor = isSelected
+    ? '#ffffff'
+    : cell.isWrongEntry
+    ? '#ef4444'
+    : cell.isError
+    ? '#ef4444'
+    : cell.isGiven
+    ? (isDark ? '#f9fafb' : '#111827')
     : '#6366f1';
+
+  // Border: every cell has a thin border on all sides.
+  // Box boundaries (cols 3,6 / rows 3,6) get a thicker RIGHT/BOTTOM border via margin trick.
+  const isBoxRight = col === 2 || col === 5;
+  const isBoxBottom = row === 2 || row === 5;
 
   return (
     <TouchableOpacity
       onPress={onPress}
+      // delayPressIn=0 ensures instant visual feedback with no drag delay
+      delayPressIn={0}
       style={{
-        width: cellSize, height: cellSize, backgroundColor: bgColor,
+        width: cellSize,
+        height: cellSize,
+        backgroundColor: bgColor,
         borderRightWidth: isBoxRight ? 2 : 0.5,
         borderBottomWidth: isBoxBottom ? 2 : 0.5,
+        borderLeftWidth: col === 0 ? 0 : 0,
+        borderTopWidth: row === 0 ? 0 : 0,
         borderColor: isDark ? '#374151' : '#9ca3af',
-        alignItems: 'center', justifyContent: 'center',
+        // Victim cells: highlight border in red
+        ...(cell.isError && !cell.isWrongEntry ? {
+          borderColor: '#ef4444',
+        } : {}),
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
       accessibilityLabel={`Row ${row + 1} col ${col + 1}${cell.value ? `, ${cell.value}` : ''}`}
       accessibilityRole="button"
@@ -85,7 +133,7 @@ function CellView({
         </Text>
       ) : cell.notes.size > 0 ? (
         <View style={{ flexWrap: 'wrap', flexDirection: 'row', width: cellSize - 4 }}>
-          {([1,2,3,4,5,6,7,8,9] as SudokuDigit[]).map((n) => (
+          {([1, 2, 3, 4, 5, 6, 7, 8, 9] as SudokuDigit[]).map((n) => (
             <Text key={n} style={{
               width: (cellSize - 4) / 3, fontSize: noteSize, textAlign: 'center',
               color: cell.notes.has(n) ? (isSelected ? '#ffffff' : '#818cf8') : 'transparent',
@@ -152,10 +200,13 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   function continueFromSave() {
     if (!savedData) { startFresh(); return; }
+    // Deserialise: notes Set becomes {} after JSON round-trip through AsyncStorage
+    const rawState = savedData.currentState as { board: ExtendedCellState[][]; selectedCell: unknown; isNotesMode: boolean };
+    const deserialisedBoard = deserialiseBoardNotes(rawState.board);
     startSession({
       puzzleId, gameType: GameType.SUDOKU, difficulty: Difficulty.MEDIUM,
       isDaily, dailyPuzzleId,
-      initialState: savedData.currentState as SudokuEngine.SudokuGameState,
+      initialState: { ...rawState, board: deserialisedBoard },
       initialElapsedSeconds: savedData.elapsedSeconds,
       initialHintsUsed: savedData.hintsUsed,
       initialHintsRemaining: savedData.hintsRemaining,
@@ -163,7 +214,6 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     setInitialized(true);
   }
 
-  // Save progress immediately when pausing, plus every 10s while playing
   const doSaveProgress = useCallback(() => {
     const s = useGameSessionStore.getState().session;
     if (!s || s.isSolved) return;
@@ -184,8 +234,8 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     return () => clearInterval(iv);
   }, [initialized, session?.isSolved, doSaveProgress]);
 
-  const gameState = session?.currentState as SudokuEngine.SudokuGameState | undefined;
-  const board = gameState?.board;
+  const gameState = session?.currentState as (SudokuEngine.SudokuGameState & { board: ExtendedBoard }) | undefined;
+  const board = gameState?.board as ExtendedBoard | undefined;
   const selectedCell = gameState?.selectedCell;
   const isNotesMode = gameState?.isNotesMode ?? false;
   const isPaused = session?.isPaused ?? false;
@@ -214,7 +264,9 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     if (gameState.board[row][col].isGiven) return;
     lightImpact();
 
-    let newBoard = gameState.board.map((r) => r.map((c) => ({ ...c, notes: new Set(c.notes) })));
+    let newBoard: ExtendedBoard = gameState.board.map((r) =>
+      r.map((c) => ({ ...c, notes: new Set(c.notes) }))
+    );
 
     if (isNotesMode) {
       const notes = new Set(newBoard[row][col].notes);
@@ -222,12 +274,27 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       newBoard[row][col] = { ...newBoard[row][col], notes };
       playSound('digit_place');
     } else {
+      // Clear the previous wrong-entry and all victim errors first
+      newBoard = newBoard.map(r => r.map(c => ({ ...c, isError: false, isWrongEntry: false })));
       newBoard[row][col] = { ...newBoard[row][col], value: digit, notes: new Set() };
-      if (autoRemoveNotes) newBoard = SudokuEngine.applyAutoRemoveNotes(newBoard, row, col, digit);
+
+      if (autoRemoveNotes) newBoard = SudokuEngine.applyAutoRemoveNotes(newBoard, row, col, digit) as ExtendedBoard;
+
       const conflicts = SudokuEngine.getBoardConflicts(newBoard);
       const cs = new Set(conflicts.map(([r, c]) => `${r},${c}`));
-      newBoard = newBoard.map((r, ri) => r.map((c, ci) => ({ ...c, isError: cs.has(`${ri},${ci}`) })));
-      if (conflicts.length > 0) playSound('error'); else playSound('digit_place');
+
+      if (cs.has(`${row},${col}`)) {
+        // This placed cell caused the conflict → wrong entry (red background)
+        newBoard[row][col] = { ...newBoard[row][col], isWrongEntry: true, isError: false };
+        // All OTHER cells in the conflict set are victims (red text only)
+        newBoard = newBoard.map((r, ri) => r.map((c, ci) => {
+          if (ri === row && ci === col) return c;
+          return cs.has(`${ri},${ci}`) ? { ...c, isError: true, isWrongEntry: false } : c;
+        }));
+        playSound('error');
+      } else {
+        playSound('digit_place');
+      }
     }
 
     updateState({ ...gameState, board: newBoard });
@@ -261,7 +328,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     const hint = SudokuEngine.getHint(gameState, sol);
     if (!hint) return;
     lightImpact(); playSound('hint');
-    updateState(hint.revealedState as SudokuEngine.SudokuGameState);
+    updateState(hint.revealedState as SudokuEngine.SudokuGameState & { board: ExtendedBoard });
   }, [gameState, isPaused, useHint, showRewardedAd, loadSolution, lightImpact, updateState]);
 
   const handleErase = useCallback(() => {
@@ -269,11 +336,12 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     const { row, col } = selectedCell;
     if (gameState.board[row][col].isGiven) return;
     lightImpact();
-    const newBoard = gameState.board.map((r, ri) =>
+    // Clear the erased cell, and also clear all error/wrongEntry states (the conflict is gone)
+    const newBoard: ExtendedBoard = gameState.board.map((r, ri) =>
       r.map((c, ci) =>
         ri === row && ci === col
-          ? { ...c, value: 0 as const, notes: new Set<SudokuDigit>(), isError: false }
-          : { ...c, notes: new Set(c.notes) }
+          ? { ...c, value: 0 as const, notes: new Set<SudokuDigit>(), isError: false, isWrongEntry: false }
+          : { ...c, isError: false, isWrongEntry: false, notes: new Set(c.notes) }
       )
     );
     updateState({ ...gameState, board: newBoard });
@@ -290,7 +358,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       resumeTimer();
     } else {
       pauseTimer();
-      doSaveProgress(); // save immediately on pause
+      doSaveProgress();
     }
   }, [isPaused, pauseTimer, resumeTimer, doSaveProgress]);
 
@@ -298,12 +366,11 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     if (!gameState) return;
     setShowResetConfirm(false);
     const pd = puzzleData as SudokuEngine.SudokuPuzzleData;
-    // Reset board AND clear undo stack so player cannot undo
     useGameSessionStore.setState((s) => ({
       session: s.session ? {
         ...s.session,
         currentState: { board: buildInitialBoard(pd.grid), selectedCell: null, isNotesMode: false },
-        undoStack: [],  // ← clear undo history
+        undoStack: [],
       } : null,
     }));
   }, [gameState, puzzleData]);
@@ -368,7 +435,6 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
                     key={ci} cell={cell} row={ri} col={ci}
                     isSelected={selectedCell?.row === ri && selectedCell?.col === ci}
                     isHighlighted={getHighlighted(ri, ci)}
-                    isConflict={cell.isError}
                     cellSize={cellSize}
                     onPress={() => handleCellPress(ri, ci)}
                     isDark={isDark}

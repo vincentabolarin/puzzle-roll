@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
+import Svg, { Polyline } from 'react-native-svg';
 import { useMutation } from '@tanstack/react-query';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
@@ -16,12 +17,13 @@ import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
 
-// Waypoint circle colors (one per waypoint number)
 const WAYPOINT_COLORS = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#ef4444','#8b5cf6','#14b8a6'];
+const PATH_COLOR = '#f59e0b';
 
 interface ZipCell { number: number | null }
 interface ZipPuzzleData { size: number; grid: ZipCell[][] }
-interface ZipState { path: { row: number; col: number }[] }
+type PathPt = { row: number; col: number };
+interface ZipState { path: PathPt[] }
 interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null }
 
 export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }: Props) {
@@ -36,17 +38,41 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [solution, setSolution] = useState<{ path: { row: number; col: number }[] } | null>(null);
+  const [solution, setSolution] = useState<{ path: PathPt[] } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pd = puzzleData as ZipPuzzleData;
   const { size, grid } = pd;
   const CELL = Math.min(Math.floor((width * 0.92) / size), 60);
+
+  const maxWaypoint = useMemo(
+    () => grid.flat().reduce((m, c) => Math.max(m, c.number ?? 0), 0),
+    [grid]
+  );
+
+  // ── Refs for PanResponder ────────────────────────────────────────────────────
   const boardOriginRef = useRef({ x: 0, y: 0 });
   const boardRef = useRef<View>(null);
+  const pathRef = useRef<PathPt[]>([]);          // live path during gesture
+  const isPausedRef = useRef(false);
+  const isSolvedRef = useRef(false);
+  const cellSizeRef = useRef(CELL);
 
-  // Find the maximum waypoint number on the board
-  const maxWaypoint = grid.flat().reduce((max, cell) => Math.max(max, cell.number ?? 0), 0);
+  useEffect(() => { cellSizeRef.current = CELL; }, [CELL]);
+  useEffect(() => { isPausedRef.current = session?.isPaused ?? false; }, [session?.isPaused]);
+  useEffect(() => { isSolvedRef.current = isSolved; }, [isSolved]);
+  // Keep pathRef in sync with store (for hint integration)
+  const gameState = session?.currentState as ZipState | undefined;
+  const path = gameState?.path ?? [];
+  useEffect(() => { pathRef.current = path; }, [path]);
+
+  function showToast(msg: string) {
+    setToastMsg(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(null), 2000);
+  }
 
   function buildInitial(): ZipState { return { path: [] }; }
 
@@ -65,42 +91,48 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }
     return () => clearInterval(iv);
   }, [initialized, session?.isSolved]);
 
-  const gameState = session?.currentState as ZipState | undefined;
-  const path = gameState?.path ?? [];
   const isPaused = session?.isPaused ?? false;
   const pathSet = new Set(path.map(p => `${p.row},${p.col}`));
 
   const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.ZIP, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onError: (_, v) => enqueue({ puzzleId, gameType: GameType.ZIP, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
 
-  function isAdjacent(a: { row: number; col: number }, b: { row: number; col: number }) { return Math.abs(a.row - b.row) + Math.abs(a.col - b.col) === 1; }
+  function isAdjacent(a: PathPt, b: PathPt) { return Math.abs(a.row - b.row) + Math.abs(a.col - b.col) === 1; }
 
-  async function tryExtendPath(r: number, c: number, currentPath: { row: number; col: number }[]) {
-    if (r < 0 || r >= size || c < 0 || c >= size) return currentPath;
-    if (!gameState || isPaused || isSolved) return currentPath;
+  /**
+   * Pure synchronous path extension. Returns { newPath, blocked }.
+   * Called directly inside PanResponder — must NOT be async.
+   */
+  function tryExtendSync(r: number, c: number, current: PathPt[]): { newPath: PathPt[]; blocked: boolean } {
+    if (r < 0 || r >= size || c < 0 || c >= size) return { newPath: current, blocked: false };
 
-    // Check if we've reached the max waypoint — must have filled all cells first
-    const lastCell = currentPath.length > 0 ? currentPath[currentPath.length - 1] : null;
     const nextCellNum = grid[r][c].number;
-    if (nextCellNum === maxWaypoint && currentPath.length < size * size - 1) return currentPath;
 
-    const alreadyIdx = currentPath.findIndex(p => p.row === r && p.col === c);
+    // Trying to reach final waypoint without filling all cells
+    if (nextCellNum === maxWaypoint && current.length < size * size - 1) {
+      return { newPath: current, blocked: true };
+    }
+
+    const alreadyIdx = current.findIndex(p => p.row === r && p.col === c);
     if (alreadyIdx !== -1) {
-      // Trim back to this point
-      return currentPath.slice(0, alreadyIdx + 1);
+      // Backtrack: trim to this point
+      return { newPath: current.slice(0, alreadyIdx + 1), blocked: false };
     }
 
-    if (currentPath.length > 0 && !isAdjacent(currentPath[currentPath.length - 1], { row: r, col: c })) return currentPath;
+    if (current.length > 0 && !isAdjacent(current[current.length - 1], { row: r, col: c })) {
+      return { newPath: current, blocked: false };
+    }
 
-    // Check waypoint ordering
+    // Enforce waypoint ordering
     if (nextCellNum !== null) {
-      const lastNum = currentPath.reduce((m, p) => Math.max(m, grid[p.row][p.col].number ?? 0), 0);
-      if (nextCellNum !== lastNum + 1) return currentPath;
+      const lastNum = current.reduce((m, p) => Math.max(m, grid[p.row][p.col].number ?? 0), 0);
+      if (nextCellNum !== lastNum + 1) return { newPath: current, blocked: false };
     }
 
-    return [...currentPath, { row: r, col: c }];
+    return { newPath: [...current, { row: r, col: c }], blocked: false };
   }
 
-  async function commitPath(newPath: { row: number; col: number }[]) {
+  /** Commit path to store and check win. Async OK here — called from event handlers outside PanResponder. */
+  async function commitPath(newPath: PathPt[]) {
     updateState({ path: newPath }, false);
     if (newPath.length === size * size) {
       let ok = true; let last = 0;
@@ -115,39 +147,63 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }
     }
   }
 
-  const pathRef = useRef(path);
-  pathRef.current = path;
+  // PanResponder: fully synchronous handlers, all state via refs
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: async (e) => {
-        if (isPaused || isSolved) return;
-        const { pageX, pageY } = e.nativeEvent;
-        const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
-        const c = Math.floor((pageX - boardOriginRef.current.x) / CELL);
-        const newPath = await tryExtendPath(r, c, pathRef.current);
-        if (newPath !== pathRef.current) { pathRef.current = newPath; await commitPath(newPath); lightImpact(); }
-      },
-      onPanResponderMove: async (e) => {
-        if (isPaused || isSolved) return;
-        const { pageX, pageY } = e.nativeEvent;
-        const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
-        const c = Math.floor((pageX - boardOriginRef.current.x) / CELL);
-        const newPath = await tryExtendPath(r, c, pathRef.current);
-        if (newPath.length !== pathRef.current.length) { pathRef.current = newPath; await commitPath(newPath); playSound('cell_tap'); }
-      },
-    })
-  ).current;
+    onPanResponderGrant: (e) => {
+      if (isPausedRef.current || isSolvedRef.current) return;
+      boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; });
+      const CELL = cellSizeRef.current;
+      const { pageX, pageY } = e.nativeEvent;
+      const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
+      const c = Math.floor((pageX - boardOriginRef.current.x) / CELL);
+      const { newPath, blocked } = tryExtendSync(r, c, pathRef.current);
+      if (blocked) return;
+      if (newPath !== pathRef.current) {
+        pathRef.current = newPath;
+        useGameSessionStore.getState().updateState({ path: newPath }, false);
+        lightImpact();
+      }
+    },
+
+    onPanResponderMove: (e) => {
+      if (isPausedRef.current || isSolvedRef.current) return;
+      const CELL = cellSizeRef.current;
+      const { pageX, pageY } = e.nativeEvent;
+      const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
+      const c = Math.floor((pageX - boardOriginRef.current.x) / CELL);
+      const prev = pathRef.current;
+      const { newPath, blocked } = tryExtendSync(r, c, prev);
+      if (blocked) {
+        // Can't call setState here (sync), schedule toast via ref
+        setToastMsg('Fill all cells before reaching the final number!');
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToastMsg(null), 2000);
+        return;
+      }
+      if (newPath.length !== prev.length) {
+        pathRef.current = newPath;
+        useGameSessionStore.getState().updateState({ path: newPath }, false);
+      }
+    },
+
+    onPanResponderRelease: () => {
+      const finalPath = pathRef.current;
+      // commitPath is async (win check) — safe to call outside PanResponder after release
+      commitPath(finalPath);
+    },
+  }), []); // created once — all live state via refs
 
   const handleHint = useCallback(async () => {
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
     const nextIdx = path.length; if (nextIdx >= sol.path.length) return;
-    const next = sol.path[nextIdx]; lightImpact(); playSound('hint');
-    const newPath = await tryExtendPath(next.row, next.col, path);
+    const next = sol.path[nextIdx];
+    lightImpact(); playSound('hint');
+    const { newPath } = tryExtendSync(next.row, next.col, path);
     await commitPath(newPath);
   }, [gameState, isPaused, path, useHint, showRewardedAd, loadSolution, lightImpact]);
 
@@ -156,63 +212,102 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }
 
   const isDark = t.background !== '#f9fafb';
   const shareable = generateShareableResult({ gameType: GameType.ZIP, difficulty: session.difficulty, elapsedSeconds: session.elapsedSeconds, hintsUsed: session.hintsUsed, date: new Date().toISOString().slice(0, 10), isDaily });
+  const boardPx = size * CELL;
+
+  // Build SVG polyline points from path
+  const svgPoints = path
+    .map(p => `${p.col * CELL + CELL / 2},${p.row * CELL + CELL / 2}`)
+    .join(' ');
 
   return (
     <>
       <GenericGameScreen puzzleId={puzzleId} gameType={GameType.ZIP} gameName="Zip" accentColor="#f59e0b" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint}>
         <View style={{ alignItems: 'center' }}>
-          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 10, textAlign: 'center' }}>
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 6, textAlign: 'center' }}>
             Drag your finger to draw the path through 1 → 2 → 3…
           </Text>
-          <View
-            ref={boardRef}
-            onLayout={() => boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; })}
-            {...panResponder.panHandlers}
-          >
-            {grid.map((row, r) => (
-              <View key={r} style={{ flexDirection: 'row' }}>
-                {row.map((cell, c) => {
-                  const key = `${r},${c}`;
-                  const inPath = pathSet.has(key);
-                  const pathIdx = path.findIndex(p => p.row === r && p.col === c);
-                  const isHead = pathIdx === path.length - 1 && path.length > 0;
-                  const waypointColor = cell.number !== null ? WAYPOINT_COLORS[(cell.number - 1) % WAYPOINT_COLORS.length] : null;
-                  return (
-                    <View
-                      key={c}
-                      style={[styles.cell, {
-                        width: CELL, height: CELL,
-                        borderColor: isDark ? '#1f2937' : '#d1d5db',
-                        backgroundColor: isHead ? '#f59e0b' : inPath ? '#f59e0b44' : (isDark ? '#111827' : '#f9fafb'),
-                      }]}
-                    >
-                      {cell.number !== null ? (
-                        // Waypoint: coloured circle with number
-                        <View style={[styles.waypointCircle, { backgroundColor: waypointColor! }]}>
-                          <Text style={styles.waypointNum}>{cell.number}</Text>
-                        </View>
-                      ) : inPath ? (
-                        <View style={[styles.pathDot, { backgroundColor: isHead ? '#fff' : '#f59e0b' }]} />
-                      ) : null}
-                    </View>
-                  );
-                })}
-              </View>
-            ))}
+
+          {/* Inline toast — non-blocking */}
+          {toastMsg ? (
+            <View style={styles.toast}>
+              <Text style={styles.toastText}>{toastMsg}</Text>
+            </View>
+          ) : (
+            <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 6 }}>
+              {path.length}/{size * size} cells
+            </Text>
+          )}
+
+          {/* panHandlers on outer wrapper, NOT on the grid View */}
+          <View {...panResponder.panHandlers}>
+            <View
+              ref={boardRef}
+              onLayout={() => boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; })}
+              style={{ width: boardPx, height: boardPx }}
+            >
+              {/* SVG polyline drawn over cells */}
+              {path.length >= 2 && (
+                <Svg
+                  style={StyleSheet.absoluteFill}
+                  width={boardPx}
+                  height={boardPx}
+                  pointerEvents="none"
+                >
+                  <Polyline
+                    points={svgPoints}
+                    fill="none"
+                    stroke={PATH_COLOR}
+                    strokeWidth={16}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </Svg>
+              )}
+              
+              {/* Cell grid */}
+              {grid.map((row, r) => (
+                <View key={r} style={{ flexDirection: 'row' }}>
+                  {row.map((cell, c) => {
+                    const inPath = pathSet.has(`${r},${c}`);
+                    const waypointColor = cell.number !== null ? WAYPOINT_COLORS[(cell.number - 1) % WAYPOINT_COLORS.length] : null;
+                    return (
+                      <View
+                        key={c}
+                        style={[styles.cell, {
+                          width: CELL, height: CELL,
+                          borderColor: isDark ? '#1f2937' : '#d1d5db',
+                          backgroundColor: inPath
+                            ? (isDark ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)')
+                            : (isDark ? '#111827' : '#f9fafb'),
+                        }]}
+                      >
+                        {cell.number !== null && (
+                          <View style={[styles.waypointCircle, { backgroundColor: waypointColor! }]}>
+                            <Text style={styles.waypointNum}>{cell.number}</Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
           </View>
-          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginTop: 8, textAlign: 'center' }}>
-            {path.length}/{size * size} cells
-          </Text>
         </View>
       </GenericGameScreen>
-      <ConfirmModal visible={showResetConfirm} title="Reset path?" message="Your drawn path will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
+
+      <ConfirmModal visible={showResetConfirm} title="Reset path?" message="Your drawn path will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); pathRef.current = []; updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
     </>
   );
 }
 
 const styles = StyleSheet.create({
   cell: { borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  waypointCircle: { width: '72%', aspectRatio: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  waypointCircle: { width: '70%', aspectRatio: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   waypointNum: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 14, color: '#ffffff' },
-  pathDot: { width: 10, height: 10, borderRadius: 5 },
+  toast: {
+    backgroundColor: 'rgba(0,0,0,0.72)', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 5, marginBottom: 6,
+  },
+  toastText: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, color: '#fff', textAlign: 'center' },
 });

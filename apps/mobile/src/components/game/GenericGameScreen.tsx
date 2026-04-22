@@ -12,7 +12,6 @@ interface GenericGameScreenProps {
   puzzleId: string;
   gameType: GameType;
   gameName: string;
-  /** Accent colour used for future theming / per-game tinting. */
   accentColor: string;
   children: ReactNode;
   isSolved: boolean;
@@ -26,7 +25,7 @@ interface GenericGameScreenProps {
   onReset: () => void;
   onGetHint: () => void;
   onClose?: () => void;
-  /** Wrap children in a ScrollView when the board may overflow the screen. */
+  onNextPuzzle?: () => void;
   scrollable?: boolean;
 }
 
@@ -34,7 +33,7 @@ export default function GenericGameScreen({
   gameType, gameName, accentColor, children,
   isSolved, elapsedSeconds, hintsUsed, hintsRemaining,
   isPaused, isDaily, shareableResult,
-  onPauseToggle, onReset, onGetHint, onClose, scrollable = false,
+  onPauseToggle, onReset, onGetHint, onClose, onNextPuzzle, scrollable = false,
 }: GenericGameScreenProps) {
   const t = useAppTheme();
   const handleClose = onClose ?? (() => router.back());
@@ -109,6 +108,7 @@ export default function GenericGameScreen({
           isDaily={isDaily}
           shareableResult={shareableResult}
           onClose={handleClose}
+          onNextPuzzle={onNextPuzzle}
         />
       )}
     </View>
