@@ -20,7 +20,7 @@ class SyncService {
       for (const difficulty of DIFFICULTIES) {
         try {
           const result = await apiClient.get<{
-            data: Array<{ id: string; gameType: string; difficulty: string; puzzleData: unknown }>;
+            data: Array<{ id: string; gameType: GameType; difficulty: Difficulty; puzzleData: unknown }>;
           }>(`/puzzles/${gameType}?difficulty=${difficulty}&limit=20&page=1`);
 
           const puzzles = Array.isArray(result)
@@ -28,7 +28,7 @@ class SyncService {
             : (result as { data: unknown[] }).data ?? [];
 
           await puzzleCache.cachePuzzles(
-            (puzzles as Array<{ id: string; gameType: string; difficulty: string; puzzleData: unknown }>).map((p) => ({
+            (puzzles as Array<{ id: string; gameType: GameType; difficulty: Difficulty; puzzleData: unknown }>).map((p) => ({
               id: p.id,
               gameType: p.gameType ?? gameType,
               difficulty: p.difficulty ?? difficulty,

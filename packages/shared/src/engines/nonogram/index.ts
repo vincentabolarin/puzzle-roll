@@ -19,12 +19,12 @@ export interface NonogramGameState {
 export type NonogramGeneratedPuzzle = GeneratedPuzzle<NonogramPuzzleData, NonogramSolution>;
 export type NonogramHintResult = HintResult<NonogramGameState>;
 
-// Sizes: easy=5, medium=7, hard=9, expert=11
+// Sizes: easy=5, medium=6, hard=7, expert=8
 export const NONOGRAM_SIZE_CONFIG: Record<Difficulty, number> = {
   [Difficulty.EASY]: 5,
-  [Difficulty.MEDIUM]: 7,
-  [Difficulty.HARD]: 9,
-  [Difficulty.EXPERT]: 11,
+  [Difficulty.MEDIUM]: 6,
+  [Difficulty.HARD]: 7,
+  [Difficulty.EXPERT]: 8,
 };
 
 function createRng(seed: number): () => number {
