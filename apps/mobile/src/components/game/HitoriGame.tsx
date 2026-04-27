@@ -21,16 +21,23 @@ type HitoriCell = HitoriEngine.HitoriCell;
 type HitoriGameState = HitoriEngine.HitoriGameState;
 type HitoriSolution = HitoriEngine.HitoriSolution;
 
-interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null }
+interface Props {
+  puzzleId: string;
+  puzzleData: unknown;
+  isDaily: boolean;
+  dailyPuzzleId: string | null;
+  onNextPuzzle?: () => void;
+}
 
-export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }: Props) {
+export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: Props) {
   const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
-  const { lightImpact, successNotification } = useHaptics();
+  const { lightImpact, mediumImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
+  const isDark = t.background !== '#f9fafb';
   const [isSolved, setIsSolved] = useState(false);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
@@ -38,6 +45,8 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const [solution, setSolution] = useState<HitoriSolution | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [conflicts, setConflicts] = useState<Set<string>>(new Set());
+
+  if (!puzzleData || typeof (puzzleData as HitoriPuzzleData).size !== 'number') return null;
 
   const pd = puzzleData as HitoriPuzzleData;
   const { size, grid: puzzleGrid } = pd;
@@ -78,16 +87,7 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     return result;
   }
 
-  const handleCellPress = useCallback(async (r: number, c: number) => {
-    if (!gameState || isPaused || isSolved) return;
-    lightImpact(); playSound('cell_tap');
-    const nb: HitoriCell[][] = gameState.board.map(row => row.map(cell => ({ ...cell })));
-    // Single-tap cycle: unshaded/circled → shaded → unshaded
-    const cur = nb[r][c].state;
-    nb[r][c] = { ...nb[r][c], state: cur === 'shaded' ? 'unshaded' : 'shaded' };
-    updateState({ board: nb });
-    revalidate(nb);
-
+  async function resolveWin(nb: HitoriCell[][]) {
     const sol = await loadSolution();
     if (sol && HitoriEngine.isHitoriSolved(nb, sol)) {
       const result = revalidate(nb);
@@ -99,18 +99,30 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
         await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.HITORI); await showInterstitialIfDue();
       }
     }
+  }
+
+  const handleCellPress = useCallback(async (r: number, c: number) => {
+    if (!gameState || isPaused || isSolved) return;
+    // Haptic on tap: light for shade, medium feedback
+    lightImpact(); playSound('cell_tap');
+    const nb: HitoriCell[][] = gameState.board.map(row => row.map(cell => ({ ...cell })));
+    const cur = nb[r][c].state;
+    nb[r][c] = { ...nb[r][c], state: cur === 'shaded' ? 'unshaded' : 'shaded' };
+    updateState({ board: nb });
+    revalidate(nb);
+    await resolveWin(nb);
   }, [gameState, isPaused, isSolved, size, lightImpact, updateState, session, markSolved, successNotification, submit, markCompleted, puzzleId, showInterstitialIfDue, loadSolution]);
 
   const handleCellLongPress = useCallback((r: number, c: number) => {
     if (!gameState || isPaused || isSolved) return;
-    lightImpact();
+    // Distinct haptic for long-press (circle = confirm unshaded)
+    mediumImpact(); playSound('cell_tap');
     const nb: HitoriCell[][] = gameState.board.map(row => row.map(cell => ({ ...cell })));
     const cur = nb[r][c].state;
-    // Long-press: toggle circled (confirmed unshaded)
     nb[r][c] = { ...nb[r][c], state: cur === 'circled' ? 'unshaded' : 'circled' };
     updateState({ board: nb });
     revalidate(nb);
-  }, [gameState, isPaused, isSolved, size, lightImpact, updateState]);
+  }, [gameState, isPaused, isSolved, size, mediumImpact, updateState]);
 
   const handleHint = useCallback(async () => {
     if (!gameState || isPaused) return;
@@ -122,17 +134,17 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     const newBoard = hint.revealedState.board as HitoriCell[][];
     updateState({ board: newBoard });
     revalidate(newBoard);
-  }, [gameState, isPaused, size, useHint, showRewardedAd, loadSolution, lightImpact, updateState]);
+    await resolveWin(newBoard);
+  }, [gameState, isPaused, size, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!board || !session) return null;
 
-  const isDark = t.background !== '#f9fafb';
   const shareable = generateShareableResult({ gameType: GameType.HITORI, difficulty: session.difficulty, elapsedSeconds: session.elapsedSeconds, hintsUsed: session.hintsUsed, date: new Date().toISOString().slice(0, 10), isDaily });
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.HITORI} gameName="Hitori" accentColor="#6366f1" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint}>
+      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.HITORI} gameName="Hitori" accentColor="#6366f1" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} onNextPuzzle={onNextPuzzle}>
         <View style={{ alignItems: 'center' }}>
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 10, textAlign: 'center' }}>
             Tap to shade · Long-press to circle (confirm unshaded)
