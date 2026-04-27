@@ -21,7 +21,7 @@ export { generatePuzzle as generateSudoku } from './engines/sudoku';
 export { generatePuzzle as generateQueens } from './engines/queens';
 export { generatePuzzle as generateZip } from './engines/zip';
 export { generatePuzzle as generateTango, TangoSymbol, TangoConstraint, TangoPuzzleData, TangoSolution, isTangoSolved, validateTangoBoard, getHint, cycleTangoSymbol } from './engines/tango';
-export { generatePuzzle as generateNonogram } from './engines/nonogram';
+export { generatePuzzle as generateNonogram, buildThemedPuzzle as buildThemedNonogram } from './engines/nonogram';
 export { generatePuzzle as generateMinesweeper } from './engines/minesweeper';
 export { generatePuzzle as generateKakuro } from './engines/kakuro';
 export { generatePuzzle as generateLightUp } from './engines/lightup';

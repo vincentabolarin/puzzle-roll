@@ -19,13 +19,12 @@ export interface NonogramGameState {
 export type NonogramGeneratedPuzzle = GeneratedPuzzle<NonogramPuzzleData, NonogramSolution>;
 export type NonogramHintResult = HintResult<NonogramGameState>;
 
-// Reduced sizes: easy 5, medium 6, hard 7, expert 8
-// Avoids exponential seeding time while still providing meaningful challenge.
+// Sizes: easy=5, medium=7, hard=9, expert=11
 export const NONOGRAM_SIZE_CONFIG: Record<Difficulty, number> = {
   [Difficulty.EASY]: 5,
-  [Difficulty.MEDIUM]: 6,
-  [Difficulty.HARD]: 7,
-  [Difficulty.EXPERT]: 8,
+  [Difficulty.MEDIUM]: 7,
+  [Difficulty.HARD]: 9,
+  [Difficulty.EXPERT]: 11,
 };
 
 function createRng(seed: number): () => number {
@@ -50,7 +49,7 @@ export function computeClues(line: boolean[]): number[] {
   return clues.length > 0 ? clues : [0];
 }
 
-// O(n·k) leftmost/rightmost sweep — replaces exponential enumeration
+// O(n·k) leftmost/rightmost sweep
 function solveLineDefinite(
   clues: number[],
   known: (boolean | null)[],
@@ -59,7 +58,6 @@ function solveLineDefinite(
   if (clues[0] === 0) return Array(length).fill(false);
   const k = clues.length;
 
-  // Leftmost placement
   const left: number[] = new Array(k).fill(0);
   {
     let pos = 0;
@@ -79,7 +77,6 @@ function solveLineDefinite(
     }
   }
 
-  // Rightmost placement
   const right: number[] = new Array(k).fill(0);
   {
     let pos = length - 1;
@@ -223,6 +220,22 @@ export function generatePuzzle(difficulty: Difficulty, seed?: number): NonogramG
   }
 
   throw new Error(`[NonogramEngine] Failed to generate ${difficulty} puzzle after ${MAX_ATTEMPTS} attempts`);
+}
+
+/**
+ * Build a themed nonogram from a pre-made pixel-art boolean grid.
+ * Themed puzzles may have multiple solutions — that is acceptable for aesthetic dailies.
+ */
+export function buildThemedPuzzle(grid: boolean[][]): NonogramGeneratedPuzzle {
+  const size = grid.length;
+  const rowClues = grid.map(row => computeClues(row));
+  const colClues = Array.from({ length: size }, (_, c) => computeClues(grid.map(row => row[c])));
+  return {
+    puzzleData: { size, rowClues, colClues },
+    solution: { grid },
+    difficulty: Difficulty.EASY, // placeholder; overridden by seed script
+    seed: -1,
+  };
 }
 
 export function isRowClueComplete(board: NonogramCellState[], clues: number[]): boolean {

@@ -10,7 +10,7 @@ const config: Config = {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@puzzle-roll/shared(.*)$': '<rootDir>/../../packages/shared/src$1',
   },
-  setupFilesAfterFramework: ['@testing-library/react-native/extend-expect'],
+  setupFilesAfterEnv: ['@testing-library/react-native/extend-expect'],
 };
 
 export default config;

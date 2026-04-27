@@ -9,6 +9,7 @@ import {
   SudokuEngine, generateQueens, generateZip, generateTango,
   generateNonogram, generateMinesweeper, generateKakuro,
   generateLightUp, generateFutoshiki, generateHitori,
+  buildThemedNonogram
 } from '@puzzle-roll/shared';
 import { SqlDriverAdapterFactory } from '@prisma/client/runtime/client';
 
@@ -27,6 +28,34 @@ const GAME_TYPES: GameType[] = [
   'minesweeper','kakuro','light_up','futoshiki','hitori',
 ];
 const DIFFICULTIES: Difficulty[] = ['easy','medium','hard','expert'];
+
+// ─── Themed Nonogram Days ────────────────────────────────────────────────────
+// Add entries here for special hand-crafted daily nonograms.
+// `grid` is a boolean[][] where true = filled cell.
+// `difficulty` determines the target difficulty slot for the daily assignment.
+// The grid must match the NONOGRAM_SIZE_CONFIG for that difficulty:
+//   easy=5, medium=7, hard=9, expert=11
+//
+// Example: letter "P" on a 5×5 easy grid:
+// {
+//   date: '2026-01-01',
+//   difficulty: 'easy',
+//   grid: [
+//     [true,  true,  true,  false, false],
+//     [true,  false, false, true,  false],
+//     [true,  true,  true,  false, false],
+//     [true,  false, false, false, false],
+//     [true,  false, false, false, false],
+//   ],
+// },
+const THEMED_NONOGRAM_DAYS: {
+  date: string;
+  difficulty: Difficulty;
+  grid: boolean[][];
+}[] = [
+  // Add themed entries here
+];
+// ─────────────────────────────────────────────────────────────────────────────
 
 type GenFn = (d: string, s: number) => { puzzleData: unknown; solution: unknown; seed: number };
 const GENERATORS: Record<GameType, GenFn> = {
@@ -52,40 +81,89 @@ async function tryGenerate(gameType: GameType, difficulty: string, seed: number)
 
 function toISO(date: Date) { return date.toISOString().slice(0,10); }
 
+/** Seed one (gameType, difficulty) combination and return generated puzzle IDs. */
+async function seedOneDifficulty(
+  gameType: GameType,
+  difficulty: Difficulty,
+  baseIndex: number,
+): Promise<string[]> {
+  const key = `${gameType}:${difficulty}`;
+  const batch: { gameType: GameType; difficulty: Difficulty; puzzleData: object; solution: object; seed: number }[] = [];
+
+  for (let i = 0; i < PUZZLES_PER_DIFFICULTY; i++) {
+    const seed = Math.abs(Math.floor(Date.now() / 1000)) + i * 997
+      + GAME_TYPES.indexOf(gameType) * 10_000
+      + DIFFICULTIES.indexOf(difficulty) * 100_000
+      + baseIndex;
+    const r = await tryGenerate(gameType, difficulty, seed);
+    if (r) batch.push({ gameType, difficulty, puzzleData: r.puzzleData as object, solution: r.solution as object, seed: r.seed });
+  }
+
+  if (batch.length === 0) {
+    console.warn(`  ⚠️  Zero puzzles for ${key}`);
+    return [];
+  }
+
+  const ids: string[] = [];
+  for (const row of batch) {
+    const c = await prisma.gamePuzzle.create({ data: row, select: { id: true } });
+    ids.push(c.id);
+  }
+  console.log(`  ✅ ${key}: ${ids.length} puzzles`);
+  return ids;
+}
+
 async function seedPuzzles(): Promise<Map<string, string[]>> {
   console.log('🎲 Generating puzzles...\n');
   const map = new Map<string, string[]>();
 
+  // Seed each game type sequentially (avoids DB overload),
+  // but all 4 difficulties of a game run IN PARALLEL.
   for (const gameType of GAME_TYPES) {
-    for (const difficulty of DIFFICULTIES) {
-      const key = `${gameType}:${difficulty}`;
-      console.log(`  ▶ ${key}`);
-      const batch: { gameType: GameType; difficulty: Difficulty; puzzleData: object; solution: object; seed: number }[] = [];
-
-      for (let i = 0; i < PUZZLES_PER_DIFFICULTY; i++) {
-        const seed = Math.abs(Math.floor(Date.now() / 1000)) + i * 997 + GAME_TYPES.indexOf(gameType) * 10_000 + DIFFICULTIES.indexOf(difficulty) * 100_000;
-        const label = `    [${i+1}/${PUZZLES_PER_DIFFICULTY}] ${gameType}-${difficulty}`;
-        console.time(label);
-        const r = await tryGenerate(gameType, difficulty, seed);
-        if (r) batch.push({ gameType, difficulty, puzzleData: r.puzzleData as object, solution: r.solution as object, seed: r.seed });
-        console.timeEnd(label);
-      }
-
-      if (batch.length === 0) { console.warn(`  ⚠️  Zero puzzles for ${key}\n`); map.set(key, []); continue; }
-
-      const ids: string[] = [];
-      for (const row of batch) {
-        const c = await prisma.gamePuzzle.create({ data: row, select: { id: true } });
-        ids.push(c.id);
-      }
-      map.set(key, ids);
-      console.log(`  ✅ ${key}: ${ids.length} puzzles\n`);
+    console.log(`▶ ${gameType}`);
+    const results = await Promise.all(
+      DIFFICULTIES.map((difficulty, i) =>
+        seedOneDifficulty(gameType, difficulty, i * PUZZLES_PER_DIFFICULTY * 10)
+      )
+    );
+    for (let i = 0; i < DIFFICULTIES.length; i++) {
+      map.set(`${gameType}:${DIFFICULTIES[i]}`, results[i]);
     }
+    console.log('');
   }
+
   return map;
 }
 
-async function seedDaily(map: Map<string, string[]>) {
+async function seedThemedNonograms(): Promise<Map<string, string>> {
+  // Returns: date → puzzleId for overriding the normal rotation
+  const dateToId = new Map<string, string>();
+  if (THEMED_NONOGRAM_DAYS.length === 0) return dateToId;
+
+  console.log(`🎨 Seeding ${THEMED_NONOGRAM_DAYS.length} themed nonogram(s)...\n`);
+  for (const entry of THEMED_NONOGRAM_DAYS) {
+    try {
+      const generated = buildThemedNonogram(entry.grid);
+      const record = await prisma.gamePuzzle.create({
+        data: {
+          gameType: 'nonogram',
+          difficulty: entry.difficulty,
+          puzzleData: generated.puzzleData as object,
+          solution: generated.solution as object,
+          seed: -1, // marker for themed puzzles
+        },
+        select: { id: true },
+      });
+      dateToId.set(entry.date, record.id);
+      console.log(`  ✅ Themed nonogram for ${entry.date} (${entry.difficulty})`);
+    } catch (e) {
+      console.error(`  ⚠️  Failed themed nonogram for ${entry.date}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  return dateToId;
+}
+
+async function seedDaily(map: Map<string, string[]>, themedOverrides: Map<string, string>) {
   console.log(`📅 Assigning ${DAILY_DAYS} days of daily puzzles...\n`);
   const start = new Date(); start.setUTCHours(0,0,0,0);
   const used = new Map<string, number>();
@@ -97,9 +175,19 @@ async function seedDaily(map: Map<string, string[]>) {
     const diff = rota[d % rota.length];
 
     for (const gt of GAME_TYPES) {
+      // Themed nonogram override
+      if (gt === 'nonogram' && themedOverrides.has(dateStr)) {
+        const themedPuzzleId = themedOverrides.get(dateStr)!;
+        await prisma.dailyPuzzle.upsert({
+          where: { gameType_date: { gameType: gt, date: dateStr } },
+          create: { gameType: gt, date: dateStr, puzzleId: themedPuzzleId },
+          update: { puzzleId: themedPuzzleId },
+        });
+        continue;
+      }
+
       let key = `${gt}:${diff}`;
       let ids = map.get(key) ?? [];
-      // Fall back to any available difficulty for this game
       if (ids.length === 0) {
         const fallback = DIFFICULTIES.map(fd=>`${gt}:${fd}`).find(k=>(map.get(k)?.length??0)>0);
         if (!fallback) continue;
@@ -127,7 +215,8 @@ async function main() {
   console.log('   Done.\n');
 
   const map = await seedPuzzles();
-  await seedDaily(map);
+  const themedOverrides = await seedThemedNonograms();
+  await seedDaily(map, themedOverrides);
 
   console.log(`\n✨ Done! ${await prisma.gamePuzzle.count()} puzzles, ${await prisma.dailyPuzzle.count()} daily assignments.`);
 }
