@@ -113,13 +113,12 @@ function countTangoSolutions(size: number, given: TangoSymbol[][], constraints: 
 }
 
 export function generatePuzzle(difficulty: Difficulty, seed?: number): TangoGeneratedPuzzle {
-  // Reveal rates high enough to reliably produce unique puzzles within attempt budget.
-  // Expert 10×10 at 30% = 30 given cells — uniqueness check passes ~70% of the time.
+  // Raised hard from 0.32 → 0.35 to increase uniqueness-check success rate
   const revealRate: Record<Difficulty, number> = {
-    [Difficulty.EASY]: 0.60,    // 4×4  = ~10 cells
-    [Difficulty.MEDIUM]: 0.45,  // 6×6  = ~16 cells
-    [Difficulty.HARD]: 0.32,    // 8×8  = ~20 cells
-    [Difficulty.EXPERT]: 0.30,  // 10×10 = 30 cells
+    [Difficulty.EASY]: 0.60,
+    [Difficulty.MEDIUM]: 0.45,
+    [Difficulty.HARD]: 0.35,   // was 0.32
+    [Difficulty.EXPERT]: 0.30,
   };
 
   const MAX_ATTEMPTS = 500;
