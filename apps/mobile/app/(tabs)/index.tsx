@@ -8,6 +8,7 @@ import { useAuthStore } from '../../src/stores/auth.store';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
 import { queryKeys } from '../../src/lib/query-client';
 import { apiClient } from '../../src/lib/api-client';
+import { usePuzzleProgressStore } from '../../src/stores/puzzle-progress.store';
 
 const GAME_CONFIGS = [
   { type: GameType.SUDOKU,      name: 'Sudoku',      description: 'Fill the 9×9 grid',      accent: '#6366f1', emoji: '🔢' },
@@ -26,6 +27,7 @@ export default function HomeScreen() {
   const { columns } = useBreakpoint();
   const { user } = useAuthStore();
   const t = useAppTheme();
+  const { isCompleted } = usePuzzleProgressStore();
 
   const { data: stats } = useQuery({
     queryKey: queryKeys.user.stats,
@@ -33,20 +35,44 @@ export default function HomeScreen() {
     enabled: !!user,
   });
 
-  const statsMap = new Map(stats?.map((s) => [s.gameType, s]) ?? []);
-  const colWidth = columns === 3 ? '31%' : '47%';
+  // Fetch today's daily puzzle IDs for all games so we can check if played
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: dailyStatuses } = useQuery({
+    queryKey: ['daily-statuses', today],
+    queryFn: async () => {
+      // Fetch all daily puzzles in parallel (best-effort)
+      const results = await Promise.allSettled(
+        GAME_CONFIGS.map(g =>
+          apiClient.get<{ dailyPuzzleId: string; puzzle: { id: string } }>(`/puzzles/${g.type}/daily`)
+            .then(r => ({ gameType: g.type, puzzleId: r.puzzle.id, dailyPuzzleId: r.dailyPuzzleId }))
+        )
+      );
+      const map = new Map<string, string>(); // gameType → puzzleId
+      for (const r of results) {
+        if (r.status === 'fulfilled') map.set(r.value.gameType, r.value.puzzleId);
+      }
+      return map;
+    },
+    enabled: !!user,
+    staleTime: 1000 * 60 * 60, // 1 hour — daily puzzles don't change mid-day
+  });
 
+  const statsMap = new Map(stats?.map(s => [s.gameType, s]) ?? []);
+  const colWidth = columns === 3 ? '31%' : '47%';
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.background }]} edges={['top']}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={[styles.appTitle, { color: t.textPrimary }]}>Puzzle Roll</Text>
-        <Text style={[styles.appSub, { color: t.textMuted }]}>10 daily logic puzzles</Text>
+        <Text style={[styles.appSub, { color: t.textMuted }]}>Daily logic puzzles</Text>
 
         <View style={styles.grid}>
-          {GAME_CONFIGS.map((game) => {
+          {GAME_CONFIGS.map(game => {
             const stat = statsMap.get(game.type);
+            const dailyPuzzleId = dailyStatuses?.get(game.type);
+            const dailyPlayed = !!dailyPuzzleId && isCompleted(dailyPuzzleId);
+
             return (
               <TouchableOpacity
                 key={game.type}
@@ -61,9 +87,15 @@ export default function HomeScreen() {
                 </View>
                 <Text style={[styles.desc, { color: t.textSecondary }]} numberOfLines={2}>{game.description}</Text>
                 <View style={styles.cardBottom}>
-                  <View style={[styles.dailyBadge, { backgroundColor: t.surface2 }]}>
-                    <Text style={[styles.dailyText, { color: t.textMuted }]}>● Daily live</Text>
-                  </View>
+                  {dailyPlayed ? (
+                    <View style={[styles.dailyBadge, { backgroundColor: '#052e16' }]}>
+                      <Text style={[styles.dailyText, { color: '#4ade80' }]}>✓ Daily played</Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.dailyBadge, { backgroundColor: t.surface2 }]}>
+                      <Text style={[styles.dailyText, { color: t.textMuted }]}>● Daily live</Text>
+                    </View>
+                  )}
                   {stat?.bestTime != null && (
                     <Text style={[styles.bestTime, { color: t.textMuted }]}>{formatTime(stat.bestTime)}</Text>
                   )}
@@ -84,10 +116,7 @@ const styles = StyleSheet.create({
   appTitle: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 32, marginBottom: 4 },
   appSub: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 14, marginBottom: 20 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  card: {
-    borderRadius: 18, padding: 16, borderWidth: 1,
-    borderLeftWidth: 4, minHeight: 130, justifyContent: 'space-between',
-  },
+  card: { borderRadius: 18, padding: 16, borderWidth: 1, borderLeftWidth: 4, minHeight: 130, justifyContent: 'space-between' },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   emoji: { fontSize: 24 },
   name: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 17, flexShrink: 1 },

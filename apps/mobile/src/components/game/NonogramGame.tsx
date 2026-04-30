@@ -19,16 +19,17 @@ import ConfirmModal from '../ui/ConfirmModal';
 interface NonogramData { size: number; rowClues: number[][]; colClues: number[][] }
 type Cell = 'empty' | 'filled' | 'marked';
 interface NGState { board: Cell[][] }
-interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null }
+interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void }
 
-export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }: Props) {
-  const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
+export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: Props) {
+  const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
+  const isDark = t.background !== '#f9fafb';
   const [isSolved, setIsSolved] = useState(false);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
@@ -37,24 +38,22 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
   const [showSolution, setShowSolution] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+  if (!puzzleData) return null;
   const pd = puzzleData as NonogramData;
   const { size, rowClues, colClues } = pd;
 
-  const CLUE_W = Math.max(24, Math.floor(width * 0.09));
-  const CELL = Math.max(24, Math.floor((width * 0.94 - CLUE_W) / size));
+  const CLUE_W = Math.max(28, Math.floor(width * 0.10));
+  const CELL = Math.max(24, Math.floor((width * 0.95 - CLUE_W) / size));
 
-  // ── Refs for PanResponder ────────────────────────────────────────────────────
   const boardRef = useRef<View>(null);
   const boardOriginRef = useRef({ x: 0, y: 0 });
   const dragBoardRef = useRef<Cell[][] | null>(null);
-  const dragModeRef = useRef<'fill' | 'mark' | null>(null); // what mode did the drag start in?
+  const dragModeRef = useRef<'fill' | 'mark' | null>(null);
   const isPausedRef = useRef(false);
   const isSolvedRef = useRef(false);
   const cellSizeRef = useRef(CELL);
   const clueWRef = useRef(CLUE_W);
   const lastDragCellRef = useRef<string | null>(null);
-
-  // Double-tap detection for mark-drag mode
   const lastTapRef = useRef<{ r: number; c: number; time: number } | null>(null);
   const DOUBLE_TAP_MS = 280;
 
@@ -99,83 +98,63 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     return true;
   }
 
-  async function applyBoardAndCheck(nb: Cell[][]) {
-    updateState({ board: nb });
-    if (checkSolved(nb)) {
-      markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-      const sol = await loadSolution(); setSolution(sol);
-      setTimeout(() => setShowSolution(true), 800);
-      const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
-      const shareable = generateShareableResult({ gameType: GameType.NONOGRAM, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
-      submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-      await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.NONOGRAM); await showInterstitialIfDue();
-    }
+  async function triggerWin(b: Cell[][], currentSession: typeof session) {
+    if (!currentSession || currentSession.isSolved) return;
+    markSolved(); setIsSolved(true); successNotification(); playSound('complete');
+    const sol = await loadSolution(); setSolution(sol);
+    setTimeout(() => setShowSolution(true), 800);
+    const elapsed = currentSession.elapsedSeconds, hints = currentSession.hintsUsed;
+    const shareable = generateShareableResult({ gameType: GameType.NONOGRAM, difficulty: currentSession.difficulty, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
+    submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+    await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.NONOGRAM); await showInterstitialIfDue();
   }
 
-  /**
-   * Tap handler on individual cells (for single-tap fill toggle and double-tap mark toggle).
-   * Cycle: empty → filled → empty (single tap)
-   * Double-tap on same cell → mark (×) toggle
-   */
+  async function applyBoardAndCheck(nb: Cell[][]) {
+    updateState({ board: nb }, true);
+    if (checkSolved(nb)) await triggerWin(nb, session);
+  }
+
   const handleCellTap = useCallback(async (r: number, c: number) => {
     if (!gameState || isPaused || isSolved) return;
     lightImpact(); playSound('cell_tap');
-
     const now = Date.now();
     const last = lastTapRef.current;
     const isDoubleTap = last && last.r === r && last.c === c && (now - last.time) < DOUBLE_TAP_MS;
     lastTapRef.current = { r, c, time: now };
-
     const nb = gameState.board.map(row => [...row]) as Cell[][];
     if (isDoubleTap) {
-      // Double-tap: toggle mark
       nb[r][c] = nb[r][c] === 'marked' ? 'empty' : 'marked';
     } else {
-      // Single tap: toggle fill
       nb[r][c] = nb[r][c] === 'filled' ? 'empty' : 'filled';
     }
     await applyBoardAndCheck(nb);
-  }, [gameState, isPaused, isSolved, lightImpact]);
+  }, [gameState, isPaused, isSolved, lightImpact, session]);
 
-  /**
-   * PanResponder for drag interactions:
-   * - Normal drag: fill cells (empty → filled)
-   * - Double-tap + drag: mark cells (empty → marked)
-   *
-   * All handlers are synchronous. Win check is triggered on release.
-   */
   const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => false, // let TouchableOpacity handle taps first
+    onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, g) => {
       const dist = Math.sqrt(g.dx * g.dx + g.dy * g.dy);
       return dist > 6 && !isPausedRef.current && !isSolvedRef.current;
     },
-
     onPanResponderGrant: (e) => {
       if (isPausedRef.current || isSolvedRef.current) return;
       const currentBoard = (useGameSessionStore.getState().session?.currentState as NGState | undefined)?.board;
       if (!currentBoard) return;
       dragBoardRef.current = currentBoard.map(row => [...row]) as Cell[][];
       lastDragCellRef.current = null;
-
-      // Determine mode: if a double-tap just happened (within 300ms), drag in mark mode
       const now = Date.now();
       const last = lastTapRef.current;
       const { pageX, pageY } = e.nativeEvent;
-      const CELL = cellSizeRef.current;
-      const CLUE = clueWRef.current;
+      const CELL = cellSizeRef.current; const CLUE = clueWRef.current;
       const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
       const c = Math.floor((pageX - boardOriginRef.current.x - CLUE) / CELL);
       const isDoubleTapDrag = last && last.r === r && last.c === c && (now - last.time) < DOUBLE_TAP_MS + 150;
       dragModeRef.current = isDoubleTapDrag ? 'mark' : 'fill';
-
       boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; });
     },
-
     onPanResponderMove: (e) => {
       if (!dragBoardRef.current || isPausedRef.current || isSolvedRef.current) return;
-      const CELL = cellSizeRef.current;
-      const CLUE = clueWRef.current;
+      const CELL = cellSizeRef.current; const CLUE = clueWRef.current;
       const { pageX, pageY } = e.nativeEvent;
       const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
       const c = Math.floor((pageX - boardOriginRef.current.x - CLUE) / CELL);
@@ -183,11 +162,8 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
       const key = `${r},${c}`;
       if (lastDragCellRef.current === key) return;
       lastDragCellRef.current = key;
-
-      const mode = dragModeRef.current;
-      if (!mode) return;
+      const mode = dragModeRef.current; if (!mode) return;
       const cur = dragBoardRef.current[r][c];
-
       if (mode === 'fill' && cur === 'empty') {
         dragBoardRef.current[r][c] = 'filled';
         useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
@@ -196,67 +172,63 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
         useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
       }
     },
-
     onPanResponderRelease: () => {
       const finalBoard = dragBoardRef.current;
-      dragBoardRef.current = null;
-      dragModeRef.current = null;
-      lastDragCellRef.current = null;
+      dragBoardRef.current = null; dragModeRef.current = null; lastDragCellRef.current = null;
       if (!finalBoard) return;
-      // Commit and check win (async OK — outside PanResponder callback chain)
       useGameSessionStore.getState().updateState({ board: finalBoard }, true);
       if (checkSolved(finalBoard)) {
-        // Trigger win flow via applyBoardAndCheck
         const s = useGameSessionStore.getState().session;
-        if (s && !s.isSolved) {
-          (async () => {
-            markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-            const sol = await loadSolution(); setSolution(sol);
-            setTimeout(() => setShowSolution(true), 800);
-            const elapsed = s.elapsedSeconds, hints = s.hintsUsed;
-            const shareable = generateShareableResult({ gameType: GameType.NONOGRAM, difficulty: s.difficulty, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
-            submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-            await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.NONOGRAM); await showInterstitialIfDue();
-          })();
-        }
+        if (s && !s.isSolved) triggerWin(finalBoard, s);
       }
     },
-
-    onPanResponderTerminate: () => {
-      dragBoardRef.current = null;
-      dragModeRef.current = null;
-      lastDragCellRef.current = null;
-    },
-  }), []); // created once; all state via refs
+    onPanResponderTerminate: () => { dragBoardRef.current = null; dragModeRef.current = null; lastDragCellRef.current = null; },
+  }), [size]);
 
   const handleHint = useCallback(async () => {
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
+    // Find first incomplete row and reveal it
     for (let r = 0; r < size; r++) {
       const rowOk = gameState.board[r].every((c, ci) => (c === 'filled') === sol.grid[r][ci]);
       if (!rowOk) {
+        lightImpact(); playSound('hint');
         const nb = gameState.board.map((row, ri) => ri === r ? row.map((_, ci): Cell => sol.grid[r][ci] ? 'filled' : 'marked') : [...row]);
-        lightImpact(); playSound('hint'); updateState({ board: nb }); return;
+        // Use updateState with pushToUndo=true so undo works
+        updateState({ board: nb }, true);
+        // Check win after hint
+        if (checkSolved(nb)) await triggerWin(nb, session);
+        return;
       }
     }
-  }, [gameState, isPaused, size, useHint, showRewardedAd, loadSolution, lightImpact, updateState]);
+  }, [gameState, isPaused, size, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
+
+  const handleUndo = useCallback(() => {
+    if (isPaused || isSolved) return;
+    lightImpact();
+    undo();
+  }, [isPaused, isSolved, lightImpact, undo]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!board || !session) return null;
 
-  const isDark = t.background !== '#f9fafb';
   const shareable = generateShareableResult({ gameType: GameType.NONOGRAM, difficulty: session.difficulty, elapsedSeconds: session.elapsedSeconds, hintsUsed: session.hintsUsed, date: new Date().toISOString().slice(0, 10), isDaily });
   const maxClueRows = Math.max(...colClues.map(c => c.length));
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.NONOGRAM} gameName="Nonogram" accentColor="#14b8a6" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} scrollable>
-        {/* panHandlers wrap only the grid area */}
+      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.NONOGRAM} gameName="Nonogram" accentColor="#14b8a6" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable>
         <View {...panResponder.panHandlers}>
-          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 8, textAlign: 'center' }}>
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 4, textAlign: 'center' }}>
             Tap: fill · Double-tap: × · Drag: fill · Double-tap+drag: ×
           </Text>
+          {/* Undo button */}
+          <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 8 }}>
+            <TouchableOpacity onPress={handleUndo} style={[styles.undoBtn, { backgroundColor: t.surface2, borderColor: t.border }]} accessibilityLabel="Undo">
+              <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Medium', fontSize: 13 }}>↩ Undo</Text>
+            </TouchableOpacity>
+          </View>
 
           {/* Column clues */}
           <View style={{ flexDirection: 'row', paddingLeft: CLUE_W }}>
@@ -270,36 +242,21 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
           </View>
 
           {/* Rows */}
-          <View
-            ref={boardRef}
-            onLayout={() => boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; })}
-          >
+          <View ref={boardRef} onLayout={() => boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; })}>
             {board.map((row, r) => (
               <View key={r} style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <View style={{ width: CLUE_W, alignItems: 'flex-end', paddingRight: 4 }}>
-                  <Text style={{ fontSize: Math.max(8, CELL * 0.28), color: t.textSecondary, fontFamily: 'JetBrainsMono-Regular' }}>
-                    {rowClues[r].join(' ')}
-                  </Text>
+                  <Text style={{ fontSize: Math.max(8, CELL * 0.28), color: t.textSecondary, fontFamily: 'JetBrainsMono-Regular' }}>{rowClues[r].join(' ')}</Text>
                 </View>
                 {row.map((cell, c) => (
-                  <TouchableOpacity
-                    key={c}
-                    onPress={() => handleCellTap(r, c)}
-                    disabled={isPaused}
+                  <TouchableOpacity key={c} onPress={() => handleCellTap(r, c)} disabled={isPaused}
                     style={{
-                      width: CELL, height: CELL,
-                      borderWidth: 0.5,
+                      width: CELL, height: CELL, borderWidth: 0.5,
                       borderColor: isDark ? '#374151' : '#9ca3af',
-                      backgroundColor:
-                        cell === 'filled' ? (isDark ? '#e5e7eb' : '#111827')
-                        : cell === 'marked' ? (isDark ? '#1f2937' : '#f3f4f6')
-                        : (isDark ? '#060818' : '#ffffff'),
+                      backgroundColor: cell === 'filled' ? (isDark ? '#e5e7eb' : '#111827') : cell === 'marked' ? (isDark ? '#1f2937' : '#f3f4f6') : (isDark ? '#060818' : '#ffffff'),
                       alignItems: 'center', justifyContent: 'center',
-                    }}
-                  >
-                    {cell === 'marked' && (
-                      <Text style={{ fontSize: CELL * 0.55, color: isDark ? '#6b7280' : '#9ca3af', lineHeight: CELL }}>×</Text>
-                    )}
+                    }}>
+                    {cell === 'marked' && <Text style={{ fontSize: CELL * 0.55, color: isDark ? '#6b7280' : '#9ca3af', lineHeight: CELL }}>×</Text>}
                   </TouchableOpacity>
                 ))}
               </View>
@@ -308,7 +265,6 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
         </View>
       </GenericGameScreen>
 
-      {/* Solution picture modal */}
       <Modal visible={showSolution} transparent animationType="fade" onRequestClose={() => setShowSolution(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
           <View style={{ backgroundColor: t.surface, borderRadius: 20, padding: 24, alignItems: 'center', borderWidth: 1, borderColor: t.borderSubtle }}>
@@ -329,8 +285,11 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
           </View>
         </View>
       </Modal>
-
       <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All your filled cells will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  undoBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
+});

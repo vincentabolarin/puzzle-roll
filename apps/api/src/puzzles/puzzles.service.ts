@@ -10,22 +10,14 @@ function todayUTC(): string {
 @Injectable()
 export class PuzzlesService {
   constructor(private readonly prisma: PrismaService) {}
+
   async getDailyPuzzle(gameType: GameType) {
     const date = todayUTC();
     const daily = await this.prisma.dailyPuzzle.findUnique({
-      where: {
-        gameType_date: {
-          gameType: gameType,
-          date,
-        },
-      },
+      where: { gameType_date: { gameType, date } },
       include: { puzzle: true },
     });
-
-    if (!daily) {
-      throw new NotFoundException(`No daily puzzle found for ${gameType} on ${date}`);
-    }
-
+    if (!daily) throw new NotFoundException(`No daily puzzle found for ${gameType} on ${date}`);
     return {
       dailyPuzzleId: daily.id,
       date: daily.date,
@@ -35,18 +27,27 @@ export class PuzzlesService {
         gameType: daily.puzzle.gameType,
         difficulty: daily.puzzle.difficulty,
         puzzleData: daily.puzzle.puzzleData,
-        // solution is intentionally omitted from this response
       },
     };
   }
 
   async getPuzzles(gameType: GameType, query: GetPuzzlesQueryDto) {
-    const { difficulty, page = 1, limit = 20 } = query;
-    const skip = (page - 1) * limit;
+    const { difficulty, limit = 20 } = query;
+
+    // Support both page (1-based) and offset (0-based); offset takes precedence
+    let skip: number;
+    if (query.offset !== undefined) {
+      skip = query.offset;
+    } else {
+      const page = Math.max(1, query.page ?? 1);
+      skip = (page - 1) * limit;
+    }
+
+    const page = Math.floor(skip / limit) + 1;
 
     const where = {
-      gameType: gameType,
-      ...(difficulty ? { difficulty: difficulty } : {}),
+      gameType,
+      ...(difficulty ? { difficulty } : {}),
     };
 
     const [puzzles, total] = await this.prisma.$transaction([
@@ -61,7 +62,6 @@ export class PuzzlesService {
           difficulty: true,
           puzzleData: true,
           createdAt: true,
-          // solution intentionally excluded
         },
       }),
       this.prisma.gamePuzzle.count({ where }),
@@ -88,7 +88,6 @@ export class PuzzlesService {
         solution: includeSolution,
       },
     });
-
     if (!puzzle) throw new NotFoundException(`Puzzle ${id} not found`);
     return puzzle;
   }
@@ -103,25 +102,15 @@ export class PuzzlesService {
   }
 
   async getAllDailyPuzzles(gameType: GameType, limit = 30) {
-    const dailies = await this.prisma.dailyPuzzle.findMany({
-      where: {
-        gameType: gameType,
-        date: { lte: todayUTC() },
-      },
+    return this.prisma.dailyPuzzle.findMany({
+      where: { gameType, date: { lte: todayUTC() } },
       orderBy: { date: 'desc' },
       take: limit,
       include: {
         puzzle: {
-          select: {
-            id: true,
-            gameType: true,
-            difficulty: true,
-            puzzleData: true,
-          },
+          select: { id: true, gameType: true, difficulty: true, puzzleData: true },
         },
       },
     });
-
-    return dailies;
   }
 }

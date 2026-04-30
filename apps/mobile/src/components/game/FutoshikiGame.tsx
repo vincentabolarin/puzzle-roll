@@ -256,7 +256,7 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
                           {sym && (
                             <Text style={{ fontFamily: 'SpaceGrotesk-Bold', fontSize: Math.max(11, CON_GAP * 0.65), color: t.accent }}>
                               {/* For vertical: '<' means top < bottom → point downward ∨; '>' means top > bottom → point upward ∧ */}
-                              {sym === '<' ? '∨' : '∧'}
+                              {sym === '<' ? '<' : '>'}
                             </Text>
                           )}
                         </View>
