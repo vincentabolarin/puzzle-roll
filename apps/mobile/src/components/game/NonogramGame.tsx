@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, useWindowDimensions, Modal, PanResponder } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Modal, PanResponder } from 'react-native';
 import { useMutation } from '@tanstack/react-query';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
@@ -41,7 +41,6 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
   if (!puzzleData) return null;
   const pd = puzzleData as NonogramData;
   const { size, rowClues, colClues } = pd;
-
   const CLUE_W = Math.max(28, Math.floor(width * 0.10));
   const CELL = Math.max(24, Math.floor((width * 0.95 - CLUE_W) / size));
 
@@ -49,10 +48,8 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
   const boardOriginRef = useRef({ x: 0, y: 0 });
   const dragBoardRef = useRef<Cell[][] | null>(null);
   const dragModeRef = useRef<'fill' | 'mark' | null>(null);
-  const isPausedRef = useRef(false);
-  const isSolvedRef = useRef(false);
-  const cellSizeRef = useRef(CELL);
-  const clueWRef = useRef(CLUE_W);
+  const isPausedRef = useRef(false); const isSolvedRef = useRef(false);
+  const cellSizeRef = useRef(CELL); const clueWRef = useRef(CLUE_W);
   const lastDragCellRef = useRef<string | null>(null);
   const lastTapRef = useRef<{ r: number; c: number; time: number } | null>(null);
   const DOUBLE_TAP_MS = 280;
@@ -91,10 +88,9 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     if (count > 0) clues.push(count);
     return clues.length > 0 ? clues : [0];
   }
-
   function checkSolved(b: Cell[][]): boolean {
-    for (let r = 0; r < size; r++) { const c = computeClues(b[r].map(x => x === 'filled')); if (JSON.stringify(c) !== JSON.stringify(rowClues[r])) return false; }
-    for (let c = 0; c < size; c++) { const cl = computeClues(b.map(row => row[c] === 'filled')); if (JSON.stringify(cl) !== JSON.stringify(colClues[c])) return false; }
+    for (let r = 0; r < size; r++) { if (JSON.stringify(computeClues(b[r].map(x => x === 'filled'))) !== JSON.stringify(rowClues[r])) return false; }
+    for (let c = 0; c < size; c++) { if (JSON.stringify(computeClues(b.map(row => row[c] === 'filled'))) !== JSON.stringify(colClues[c])) return false; }
     return true;
   }
 
@@ -109,66 +105,47 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.NONOGRAM); await showInterstitialIfDue();
   }
 
-  async function applyBoardAndCheck(nb: Cell[][]) {
-    updateState({ board: nb }, true);
-    if (checkSolved(nb)) await triggerWin(nb, session);
-  }
-
   const handleCellTap = useCallback(async (r: number, c: number) => {
     if (!gameState || isPaused || isSolved) return;
     lightImpact(); playSound('cell_tap');
-    const now = Date.now();
-    const last = lastTapRef.current;
+    const now = Date.now(); const last = lastTapRef.current;
     const isDoubleTap = last && last.r === r && last.c === c && (now - last.time) < DOUBLE_TAP_MS;
     lastTapRef.current = { r, c, time: now };
     const nb = gameState.board.map(row => [...row]) as Cell[][];
-    if (isDoubleTap) {
-      nb[r][c] = nb[r][c] === 'marked' ? 'empty' : 'marked';
-    } else {
-      nb[r][c] = nb[r][c] === 'filled' ? 'empty' : 'filled';
-    }
-    await applyBoardAndCheck(nb);
+    if (isDoubleTap) { nb[r][c] = nb[r][c] === 'marked' ? 'empty' : 'marked'; }
+    else { nb[r][c] = nb[r][c] === 'filled' ? 'empty' : 'filled'; }
+    updateState({ board: nb }, true);
+    if (checkSolved(nb)) await triggerWin(nb, session);
   }, [gameState, isPaused, isSolved, lightImpact, session]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, g) => {
-      const dist = Math.sqrt(g.dx * g.dx + g.dy * g.dy);
-      return dist > 6 && !isPausedRef.current && !isSolvedRef.current;
-    },
+    onMoveShouldSetPanResponder: (_, g) => Math.sqrt(g.dx * g.dx + g.dy * g.dy) > 6 && !isPausedRef.current && !isSolvedRef.current,
     onPanResponderGrant: (e) => {
       if (isPausedRef.current || isSolvedRef.current) return;
       const currentBoard = (useGameSessionStore.getState().session?.currentState as NGState | undefined)?.board;
       if (!currentBoard) return;
       dragBoardRef.current = currentBoard.map(row => [...row]) as Cell[][];
       lastDragCellRef.current = null;
-      const now = Date.now();
-      const last = lastTapRef.current;
-      const { pageX, pageY } = e.nativeEvent;
-      const CELL = cellSizeRef.current; const CLUE = clueWRef.current;
+      const { pageX, pageY } = e.nativeEvent; const CELL = cellSizeRef.current; const CLUE = clueWRef.current;
       const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
       const c = Math.floor((pageX - boardOriginRef.current.x - CLUE) / CELL);
-      const isDoubleTapDrag = last && last.r === r && last.c === c && (now - last.time) < DOUBLE_TAP_MS + 150;
-      dragModeRef.current = isDoubleTapDrag ? 'mark' : 'fill';
+      const now = Date.now(); const last = lastTapRef.current;
+      dragModeRef.current = (last && last.r === r && last.c === c && (now - last.time) < DOUBLE_TAP_MS + 150) ? 'mark' : 'fill';
       boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; });
     },
     onPanResponderMove: (e) => {
       if (!dragBoardRef.current || isPausedRef.current || isSolvedRef.current) return;
-      const CELL = cellSizeRef.current; const CLUE = clueWRef.current;
-      const { pageX, pageY } = e.nativeEvent;
+      const { pageX, pageY } = e.nativeEvent; const CELL = cellSizeRef.current; const CLUE = clueWRef.current;
       const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
       const c = Math.floor((pageX - boardOriginRef.current.x - CLUE) / CELL);
       if (r < 0 || r >= size || c < 0 || c >= size) return;
-      const key = `${r},${c}`;
-      if (lastDragCellRef.current === key) return;
+      const key = `${r},${c}`; if (lastDragCellRef.current === key) return;
       lastDragCellRef.current = key;
       const mode = dragModeRef.current; if (!mode) return;
       const cur = dragBoardRef.current[r][c];
-      if (mode === 'fill' && cur === 'empty') {
-        dragBoardRef.current[r][c] = 'filled';
-        useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
-      } else if (mode === 'mark' && cur === 'empty') {
-        dragBoardRef.current[r][c] = 'marked';
+      if ((mode === 'fill' && cur === 'empty') || (mode === 'mark' && cur === 'empty')) {
+        dragBoardRef.current[r][c] = mode === 'fill' ? 'filled' : 'marked';
         useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
       }
     },
@@ -189,26 +166,17 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
-    // Find first incomplete row and reveal it
     for (let r = 0; r < size; r++) {
       const rowOk = gameState.board[r].every((c, ci) => (c === 'filled') === sol.grid[r][ci]);
       if (!rowOk) {
         lightImpact(); playSound('hint');
         const nb = gameState.board.map((row, ri) => ri === r ? row.map((_, ci): Cell => sol.grid[r][ci] ? 'filled' : 'marked') : [...row]);
-        // Use updateState with pushToUndo=true so undo works
         updateState({ board: nb }, true);
-        // Check win after hint
         if (checkSolved(nb)) await triggerWin(nb, session);
         return;
       }
     }
   }, [gameState, isPaused, size, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
-
-  const handleUndo = useCallback(() => {
-    if (isPaused || isSolved) return;
-    lightImpact();
-    undo();
-  }, [isPaused, isSolved, lightImpact, undo]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!board || !session) return null;
@@ -218,30 +186,25 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.NONOGRAM} gameName="Nonogram" accentColor="#14b8a6" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable>
+      <GenericGameScreen
+        puzzleId={puzzleId} gameType={GameType.NONOGRAM} gameName="Nonogram" accentColor="#14b8a6"
+        isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed}
+        hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable}
+        onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)}
+        onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable
+        showUndo onUndo={() => { lightImpact(); undo(); }}
+      >
         <View {...panResponder.panHandlers}>
-          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 4, textAlign: 'center' }}>
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 8, textAlign: 'center' }}>
             Tap: fill · Double-tap: × · Drag: fill · Double-tap+drag: ×
           </Text>
-          {/* Undo button */}
-          <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 8 }}>
-            <TouchableOpacity onPress={handleUndo} style={[styles.undoBtn, { backgroundColor: t.surface2, borderColor: t.border }]} accessibilityLabel="Undo">
-              <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Medium', fontSize: 13 }}>↩ Undo</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Column clues */}
           <View style={{ flexDirection: 'row', paddingLeft: CLUE_W }}>
             {colClues.map((clue, c) => (
               <View key={c} style={{ width: CELL, height: maxClueRows * 14, justifyContent: 'flex-end', alignItems: 'center' }}>
-                {clue.map((n, i) => (
-                  <Text key={i} style={{ fontSize: Math.max(8, CELL * 0.28), color: t.textSecondary, fontFamily: 'JetBrainsMono-Regular', lineHeight: 14 }}>{n}</Text>
-                ))}
+                {clue.map((n, i) => <Text key={i} style={{ fontSize: Math.max(8, CELL * 0.28), color: t.textSecondary, fontFamily: 'JetBrainsMono-Regular', lineHeight: 14 }}>{n}</Text>)}
               </View>
             ))}
           </View>
-
-          {/* Rows */}
           <View ref={boardRef} onLayout={() => boardRef.current?.measure((_x, _y, _w, _h, px, py) => { boardOriginRef.current = { x: px, y: py }; })}>
             {board.map((row, r) => (
               <View key={r} style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -250,12 +213,7 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
                 </View>
                 {row.map((cell, c) => (
                   <TouchableOpacity key={c} onPress={() => handleCellTap(r, c)} disabled={isPaused}
-                    style={{
-                      width: CELL, height: CELL, borderWidth: 0.5,
-                      borderColor: isDark ? '#374151' : '#9ca3af',
-                      backgroundColor: cell === 'filled' ? (isDark ? '#e5e7eb' : '#111827') : cell === 'marked' ? (isDark ? '#1f2937' : '#f3f4f6') : (isDark ? '#060818' : '#ffffff'),
-                      alignItems: 'center', justifyContent: 'center',
-                    }}>
+                    style={{ width: CELL, height: CELL, borderWidth: 0.5, borderColor: isDark ? '#374151' : '#9ca3af', backgroundColor: cell === 'filled' ? (isDark ? '#e5e7eb' : '#111827') : cell === 'marked' ? (isDark ? '#1f2937' : '#f3f4f6') : (isDark ? '#060818' : '#ffffff'), alignItems: 'center', justifyContent: 'center' }}>
                     {cell === 'marked' && <Text style={{ fontSize: CELL * 0.55, color: isDark ? '#6b7280' : '#9ca3af', lineHeight: CELL }}>×</Text>}
                   </TouchableOpacity>
                 ))}
@@ -273,9 +231,7 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
             <View style={{ borderWidth: 1, borderColor: t.border }}>
               {(solution?.grid ?? []).map((row, r) => (
                 <View key={r} style={{ flexDirection: 'row' }}>
-                  {row.map((filled, c) => (
-                    <View key={c} style={{ width: Math.min(8, Math.floor(160 / size)), height: Math.min(8, Math.floor(160 / size)), backgroundColor: filled ? '#111827' : '#f9fafb' }} />
-                  ))}
+                  {row.map((filled, c) => <View key={c} style={{ width: Math.min(8, Math.floor(160 / size)), height: Math.min(8, Math.floor(160 / size)), backgroundColor: filled ? '#111827' : '#f9fafb' }} />)}
                 </View>
               ))}
             </View>
@@ -289,7 +245,3 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  undoBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
-});

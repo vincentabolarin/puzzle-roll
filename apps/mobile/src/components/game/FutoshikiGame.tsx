@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { useMutation } from '@tanstack/react-query';
 import { GameType, Difficulty, FutoshikiEngine } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
@@ -21,16 +21,15 @@ type FutoshikiGameState = FutoshikiEngine.FutoshikiGameState;
 type FutoshikiSolution = FutoshikiEngine.FutoshikiSolution;
 type FutoshikiConstraint = FutoshikiEngine.FutoshikiConstraint;
 
-interface Props {
-  puzzleId: string;
-  puzzleData: unknown;
-  isDaily: boolean;
-  dailyPuzzleId: string | null;
-  onNextPuzzle?: () => void;
+interface FutoshikiState extends FutoshikiGameState {
+  notes: Record<string, number[]>;
+  isNotesMode: boolean;
 }
 
+interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void }
+
 export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: Props) {
-  const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
+  const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
@@ -48,15 +47,14 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
   const [pressedDigit, setPressedDigit] = useState<number | null>(null);
 
   if (!puzzleData || typeof (puzzleData as FutoshikiPuzzleData).size !== 'number') return null;
-
   const pd = puzzleData as FutoshikiPuzzleData;
   const { size, given, constraints } = pd;
 
-  const CON_GAP = Math.max(14, Math.floor(width * 0.04));
-  const CELL = Math.max(32, Math.floor((width * 0.92 - CON_GAP * (size - 1)) / size));
+  const CON_GAP = Math.max(12, Math.floor(width * 0.035));
+  const CELL = Math.max(30, Math.floor((Math.min(width, 420) * 0.9 - CON_GAP * (size - 1)) / size));
 
-  function buildInitial(): FutoshikiGameState {
-    return { board: given.map(row => [...row]), selectedCell: null };
+  function buildInitial(): FutoshikiState {
+    return { board: given.map(row => [...row]), selectedCell: null, notes: {}, isNotesMode: false };
   }
 
   useEffect(() => {
@@ -65,7 +63,13 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
   }, [puzzleId]);
 
   function startFresh() { startSession({ puzzleId, gameType: GameType.FUTOSHIKI, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: buildInitial(), initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 }); setInitialized(true); }
-  function continueFromSave() { startSession({ puzzleId, gameType: GameType.FUTOSHIKI, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: (savedData?.currentState ?? buildInitial()) as FutoshikiGameState, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 }); setInitialized(true); }
+  function continueFromSave() {
+    const raw = (savedData?.currentState ?? buildInitial()) as FutoshikiState;
+    if (!raw.notes) raw.notes = {};
+    if (raw.isNotesMode === undefined) raw.isNotesMode = false;
+    startSession({ puzzleId, gameType: GameType.FUTOSHIKI, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: raw, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 });
+    setInitialized(true);
+  }
   const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: FutoshikiSolution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
   useEffect(() => {
@@ -74,9 +78,11 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     return () => clearInterval(iv);
   }, [initialized, session?.isSolved]);
 
-  const gameState = session?.currentState as FutoshikiGameState | undefined;
+  const gameState = session?.currentState as FutoshikiState | undefined;
   const board = gameState?.board;
   const selectedCell = gameState?.selectedCell;
+  const notes = gameState?.notes ?? {};
+  const isNotesMode = gameState?.isNotesMode ?? false;
   const isPaused = session?.isPaused ?? false;
 
   const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onError: (_, v) => enqueue({ puzzleId, gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
@@ -89,21 +95,19 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
 
   async function resolveWin(nb: number[][]) {
     const result = FutoshikiEngine.validateFutoshikiBoard(nb, size, constraints);
-    if (result.conflicts.length === 0 && FutoshikiEngine.isFutoshikiSolved(nb, solution ?? { grid: nb })) {
-      const sol = await loadSolution();
-      if (sol && FutoshikiEngine.isFutoshikiSolved(nb, sol)) {
-        markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-        const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
-        const shareable = generateShareableResult({ gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
-        submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-        await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.FUTOSHIKI); await showInterstitialIfDue();
-      }
+    if (result.conflicts.length > 0) return;
+    const sol = await loadSolution();
+    if (sol && FutoshikiEngine.isFutoshikiSolved(nb, sol)) {
+      markSolved(); setIsSolved(true); successNotification(); playSound('complete');
+      const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
+      const shareable = generateShareableResult({ gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
+      submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+      await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.FUTOSHIKI); await showInterstitialIfDue();
     }
   }
 
   const handleCellPress = useCallback((r: number, c: number) => {
-    if (!gameState || isPaused || isSolved) return;
-    if (given[r][c] !== 0) return;
+    if (!gameState || isPaused || isSolved || given[r][c] !== 0) return;
     lightImpact();
     updateState({ ...gameState, selectedCell: { row: r, col: c } }, false);
   }, [gameState, isPaused, isSolved, given, lightImpact, updateState]);
@@ -113,15 +117,22 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     const { row, col } = selectedCell;
     if (given[row][col] !== 0) return;
     lightImpact(); playSound('digit_place');
-    setPressedDigit(digit);
-    setTimeout(() => setPressedDigit(null), 120);
+    setPressedDigit(digit); setTimeout(() => setPressedDigit(null), 120);
 
-    const nb = gameState.board.map(r => [...r]);
-    nb[row][col] = nb[row][col] === digit ? 0 : digit;
-    updateState({ ...gameState, board: nb });
-    revalidate(nb);
-    if (nb[row][col] !== 0) await resolveWin(nb);
-  }, [gameState, selectedCell, isPaused, isSolved, given, size, constraints, solution, lightImpact, updateState, session]);
+    if (isNotesMode) {
+      const key = `${row},${col}`;
+      const cellNotes = new Set(notes[key] ?? []);
+      if (cellNotes.has(digit)) cellNotes.delete(digit); else cellNotes.add(digit);
+      updateState({ ...gameState, notes: { ...notes, [key]: Array.from(cellNotes) } }, true);
+    } else {
+      const nb = gameState.board.map(r => [...r]);
+      nb[row][col] = nb[row][col] === digit ? 0 : digit;
+      const newNotes = { ...notes }; delete newNotes[`${row},${col}`];
+      updateState({ ...gameState, board: nb, notes: newNotes }, true);
+      revalidate(nb);
+      if (nb[row][col] !== 0) await resolveWin(nb);
+    }
+  }, [gameState, selectedCell, isPaused, isSolved, given, isNotesMode, notes, lightImpact, updateState, session]);
 
   const handleErase = useCallback(() => {
     if (!gameState || !selectedCell || isPaused || isSolved) return;
@@ -130,71 +141,91 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     lightImpact();
     const nb = gameState.board.map(r => [...r]);
     nb[row][col] = 0;
-    updateState({ ...gameState, board: nb });
+    const newNotes = { ...notes }; delete newNotes[`${row},${col}`];
+    updateState({ ...gameState, board: nb, notes: newNotes }, true);
     revalidate(nb);
-  }, [gameState, selectedCell, isPaused, isSolved, given, lightImpact, updateState, size, constraints]);
+  }, [gameState, selectedCell, isPaused, isSolved, given, notes, lightImpact, updateState, size, constraints]);
 
   const handleHint = useCallback(async () => {
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
-    const hint = FutoshikiEngine.getHint(gameState, sol, given);
-    if (!hint) return;
+    const hint = FutoshikiEngine.getHint(gameState, sol, given); if (!hint) return;
     lightImpact(); playSound('hint');
-    const newState = { ...gameState, ...(hint.revealedState as Partial<FutoshikiGameState>) };
-    updateState(newState);
+    const newState = { ...gameState, ...(hint.revealedState as Partial<FutoshikiState>) };
+    updateState(newState, true);
     revalidate(newState.board);
     await resolveWin(newState.board);
-  }, [gameState, isPaused, given, useHint, showRewardedAd, loadSolution, lightImpact, updateState, size, constraints, session]);
+  }, [gameState, isPaused, given, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
 
-  // Constraint helpers: find constraint between two adjacent cells
-  function getHCon(r: number, c: number): FutoshikiConstraint | undefined {
-    // Between (r,c) → (r,c+1)
-    return constraints.find(con =>
+  function getHConSymbol(r: number, c: number): string | null {
+    const con = constraints.find(con =>
       (con.row1 === r && con.col1 === c && con.row2 === r && con.col2 === c + 1) ||
       (con.row1 === r && con.col1 === c + 1 && con.row2 === r && con.col2 === c)
     );
+    if (!con) return null;
+    if (con.row1 === r && con.col1 === c) return con.direction;
+    return con.direction === '<' ? '>' : '<';
   }
-  function getVCon(r: number, c: number): FutoshikiConstraint | undefined {
-    // Between (r,c) → (r+1,c)
-    return constraints.find(con =>
+
+  function getVConSymbol(r: number, c: number): string | null {
+    const con = constraints.find(con =>
       (con.row1 === r && con.col1 === c && con.row2 === r + 1 && con.col2 === c) ||
       (con.row1 === r + 1 && con.col1 === c && con.row2 === r && con.col2 === c)
     );
-  }
-
-  /**
-   * Get the display symbol for a constraint as seen from the left/top cell.
-   * FutoshikiConstraint.direction is the inequality between (row1,col1) and (row2,col2).
-   * If the constraint is stored "flipped" (row2/col2 is actually the left/top cell),
-   * we must flip the direction for display.
-   */
-  function getHConSymbol(r: number, c: number, con: FutoshikiConstraint): string {
-    // con compares con.row1,col1 < or > con.row2,col2
-    // We're displaying between cell (r,c) and (r,c+1)
-    if (con.row1 === r && con.col1 === c) return con.direction; // natural: (r,c) ? (r,c+1)
-    // Flipped: (r,c+1) ? (r,c), so flip direction
-    return con.direction === '<' ? '>' : '<';
-  }
-  function getVConSymbol(r: number, c: number, con: FutoshikiConstraint): string {
-    if (con.row1 === r && con.col1 === c) return con.direction; // natural: (r,c) ? (r+1,c) — show vertically
-    return con.direction === '<' ? '>' : '<';
+    if (!con) return null;
+    const dir = con.row1 === r && con.col1 === c ? con.direction : (con.direction === '<' ? '>' : '<');
+    return dir === '<' ? '∨' : '∧';
   }
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!board || !session) return null;
 
   const shareable = generateShareableResult({ gameType: GameType.FUTOSHIKI, difficulty: session.difficulty, elapsedSeconds: session.elapsedSeconds, hintsUsed: session.hintsUsed, date: new Date().toISOString().slice(0, 10), isDaily });
+  const actionBg = isDark ? '#1f2937' : '#f3f4f6';
+
+  const notesToggle = (
+    <TouchableOpacity
+      onPress={() => updateState({ ...gameState, isNotesMode: !isNotesMode }, false)}
+      style={[styles.actionBtn, { backgroundColor: isNotesMode ? '#4f46e5' : actionBg, borderColor: isNotesMode ? '#6366f1' : t.border }]}
+      accessibilityLabel="Toggle notes"
+    >
+      <Text style={{ fontSize: 16, marginBottom: 2 }}>✏️</Text>
+      <Text style={{ fontFamily: 'SpaceGrotesk-Medium', fontSize: 9, color: isNotesMode ? '#a5b4fc' : t.textMuted }}>Notes</Text>
+    </TouchableOpacity>
+  );
+
+  const numpad = (
+    <View style={styles.numPad}>
+      {Array.from({ length: size }, (_, i) => i + 1).map(d => (
+        <TouchableOpacity key={d} onPress={() => handleDigit(d)} activeOpacity={0.6}
+          style={[styles.numKey, { backgroundColor: pressedDigit === d ? '#6366f1' : t.surface, borderColor: pressedDigit === d ? '#6366f1' : t.border, transform: [{ scale: pressedDigit === d ? 0.92 : 1 }] }]}>
+          <Text style={{ color: pressedDigit === d ? '#fff' : t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 22 }}>{d}</Text>
+        </TouchableOpacity>
+      ))}
+      <TouchableOpacity onPress={handleErase} activeOpacity={0.6}
+        style={[styles.numKey, { backgroundColor: t.surface, borderColor: t.border }]}>
+        <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Bold', fontSize: 20 }}>⌫</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.FUTOSHIKI} gameName="Futoshiki" accentColor="#6366f1" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable>
+      <GenericGameScreen
+        puzzleId={puzzleId} gameType={GameType.FUTOSHIKI} gameName="Futoshiki" accentColor="#6366f1"
+        isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed}
+        hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable}
+        onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)}
+        onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable
+        showUndo onUndo={() => { lightImpact(); undo(); }}
+        extraControls={notesToggle} numpad={numpad}
+      >
         <View style={{ alignItems: 'center' }}>
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 10, textAlign: 'center' }}>
-            Fill every row & column 1–{size}. Respect the {'<'} {'>'} inequalities.
+            Fill every row & column 1–{size}. Respect {'<'} {'>'} inequalities.
           </Text>
 
-          {/* ── Grid ── */}
           {board.map((row, r) => (
             <View key={r}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -202,63 +233,46 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
                   const isGiven = given[r][c] !== 0;
                   const isSelected = selectedCell?.row === r && selectedCell?.col === c;
                   const hasConflict = conflicts.has(`${r},${c}`);
-                  const hCon = c < size - 1 ? getHCon(r, c) : undefined;
+                  const cellNotes = notes[`${r},${c}`] ?? [];
+                  const hSym = c < size - 1 ? getHConSymbol(r, c) : null;
 
                   return (
                     <View key={c} style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <TouchableOpacity
-                        onPress={() => handleCellPress(r, c)}
-                        disabled={isPaused || isGiven}
+                        onPress={() => handleCellPress(r, c)} disabled={isPaused || isGiven}
                         style={{
                           width: CELL, height: CELL, borderRadius: 8, borderWidth: 1.5,
                           borderColor: hasConflict ? '#ef4444' : isSelected ? '#6366f1' : (isDark ? '#374151' : '#d1d5db'),
-                          backgroundColor: isSelected
-                            ? (isDark ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.1)')
-                            : (isDark ? '#111827' : '#ffffff'),
+                          backgroundColor: isSelected ? (isDark ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.1)') : (isDark ? '#111827' : '#ffffff'),
                           alignItems: 'center', justifyContent: 'center',
-                        }}
-                      >
-                        {val !== 0 && (
-                          <Text style={{
-                            fontFamily: isGiven ? 'SpaceGrotesk-Bold' : 'JetBrainsMono-Regular',
-                            fontSize: CELL * 0.52,
-                            color: hasConflict ? '#ef4444' : isGiven ? t.textPrimary : '#6366f1',
-                          }}>
-                            {val}
-                          </Text>
-                        )}
+                        }}>
+                        {val !== 0 ? (
+                          <Text style={{ fontFamily: isGiven ? 'SpaceGrotesk-Bold' : 'JetBrainsMono-Regular', fontSize: CELL * 0.52, color: hasConflict ? '#ef4444' : isGiven ? t.textPrimary : '#6366f1' }}>{val}</Text>
+                        ) : cellNotes.length > 0 ? (
+                          <View style={{ flexWrap: 'wrap', flexDirection: 'row', width: CELL - 4 }}>
+                            {Array.from({ length: size }, (_, i) => i + 1).map(n => (
+                              <Text key={n} style={{ width: (CELL - 4) / Math.ceil(Math.sqrt(size)), fontSize: Math.max(7, CELL * 0.22), textAlign: 'center', color: cellNotes.includes(n) ? '#818cf8' : 'transparent', fontFamily: 'SpaceGrotesk-Medium' }}>{n}</Text>
+                            ))}
+                          </View>
+                        ) : null}
                       </TouchableOpacity>
-
-                      {/* Horizontal constraint: show < or > between (r,c) and (r,c+1) */}
                       {c < size - 1 && (
                         <View style={{ width: CON_GAP, alignItems: 'center', justifyContent: 'center' }}>
-                          {hCon && (
-                            <Text style={{ fontFamily: 'SpaceGrotesk-Bold', fontSize: Math.max(12, CON_GAP * 0.7), color: t.accent }}>
-                              {getHConSymbol(r, c, hCon)}
-                            </Text>
-                          )}
+                          {hSym && <Text style={{ fontFamily: 'SpaceGrotesk-Bold', fontSize: Math.max(12, CON_GAP * 0.7), color: t.accent }}>{hSym}</Text>}
                         </View>
                       )}
                     </View>
                   );
                 })}
               </View>
-
-              {/* Vertical constraint row: show < or > between (r,c) and (r+1,c) */}
               {r < size - 1 && (
                 <View style={{ flexDirection: 'row', height: CON_GAP }}>
                   {row.map((_, c) => {
-                    const vCon = getVCon(r, c);
-                    const sym = vCon ? getVConSymbol(r, c, vCon) : null;
+                    const vSym = getVConSymbol(r, c);
                     return (
                       <View key={c} style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <View style={{ width: CELL, alignItems: 'center', justifyContent: 'center' }}>
-                          {sym && (
-                            <Text style={{ fontFamily: 'SpaceGrotesk-Bold', fontSize: Math.max(11, CON_GAP * 0.65), color: t.accent }}>
-                              {/* For vertical: '<' means top < bottom → point downward ∨; '>' means top > bottom → point upward ∧ */}
-                              {sym === '<' ? '<' : '>'}
-                            </Text>
-                          )}
+                          {vSym && <Text style={{ fontFamily: 'SpaceGrotesk-Bold', fontSize: Math.max(11, CON_GAP * 0.65), color: t.accent }}>{vSym}</Text>}
                         </View>
                         {c < size - 1 && <View style={{ width: CON_GAP }} />}
                       </View>
@@ -268,45 +282,15 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
               )}
             </View>
           ))}
-
-          {/* ── Visual separator ── */}
-          <View style={{ width: '90%', height: 1, backgroundColor: t.border, marginTop: 28, marginBottom: 20 }} />
-
-          {/* ── Digit pad ── */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, paddingHorizontal: 8 }}>
-            {Array.from({ length: size }, (_, i) => i + 1).map(d => (
-              <TouchableOpacity
-                key={d}
-                onPress={() => handleDigit(d)}
-                activeOpacity={0.6}
-                style={[
-                  styles.numKey,
-                  {
-                    backgroundColor: pressedDigit === d ? '#6366f1' : t.surface2,
-                    borderColor: pressedDigit === d ? '#6366f1' : t.border,
-                    transform: [{ scale: pressedDigit === d ? 0.92 : 1 }],
-                  },
-                ]}
-              >
-                <Text style={{ color: pressedDigit === d ? '#fff' : t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 22 }}>{d}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity
-              onPress={handleErase}
-              activeOpacity={0.6}
-              style={[styles.numKey, { backgroundColor: t.surface2, borderColor: t.border }]}
-            >
-              <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Bold', fontSize: 20 }}>⌫</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </GenericGameScreen>
-
       <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All your entries will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); setConflicts(new Set()); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  actionBtn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, minWidth: 56, minHeight: 52, borderWidth: 1 },
+  numPad: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
   numKey: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });

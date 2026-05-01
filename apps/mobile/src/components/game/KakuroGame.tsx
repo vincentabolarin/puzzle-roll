@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import Svg, { Line } from 'react-native-svg';
 import { useMutation } from '@tanstack/react-query';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
@@ -21,8 +21,7 @@ interface KBlackCell { type: 'black'; acrossClue: number | null; downClue: numbe
 interface KWhiteCell { type: 'white'; value: number }
 type KCell = KBlackCell | KWhiteCell;
 interface KakuroPuzzleData { size: number; grid: KCell[][] }
-// notes: set of candidate numbers the player pencils in
-interface KakuroState { values: Record<string, number>; notes: Record<string, number[]> }
+interface KakuroState { values: Record<string, number>; notes: Record<string, number[]>; isNotesMode: boolean }
 interface KakuroProps { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void }
 
 export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: KakuroProps) {
@@ -42,15 +41,14 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const [selected, setSelected] = useState<string | null>(null);
   const [pressedDigit, setPressedDigit] = useState<number | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [isNotesMode, setIsNotesMode] = useState(false);
 
   if (!puzzleData || typeof (puzzleData as KakuroPuzzleData).size !== 'number') return null;
   const pd = puzzleData as KakuroPuzzleData;
   const { size, grid } = pd;
   const CELL = Math.min(Math.floor((width * 0.96) / size), 48);
-  const CLR = '#fff'; // clue text color on black cells
+  const CLR = '#fff';
 
-  function buildInitial(): KakuroState { return { values: {}, notes: {} }; }
+  function buildInitial(): KakuroState { return { values: {}, notes: {}, isNotesMode: false }; }
 
   useEffect(() => {
     async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); setShowResume(true); } else startFresh(); }
@@ -59,9 +57,10 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   function startFresh() { startSession({ puzzleId, gameType: GameType.KAKURO, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: buildInitial(), initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 }); setInitialized(true); }
   function continueFromSave() {
-    const state = (savedData?.currentState ?? buildInitial()) as KakuroState;
-    if (!state.notes) state.notes = {};
-    startSession({ puzzleId, gameType: GameType.KAKURO, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: state, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 });
+    const raw = (savedData?.currentState ?? buildInitial()) as KakuroState;
+    if (!raw.notes) raw.notes = {};
+    if (raw.isNotesMode === undefined) raw.isNotesMode = false;
+    startSession({ puzzleId, gameType: GameType.KAKURO, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: raw, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 });
     setInitialized(true);
   }
   const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: typeof solution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
@@ -75,6 +74,7 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const gameState = session?.currentState as KakuroState | undefined;
   const values = gameState?.values ?? {};
   const notes = gameState?.notes ?? {};
+  const isNotesMode = gameState?.isNotesMode ?? false;
   const isPaused = session?.isPaused ?? false;
 
   const { mutate: submit } = useMutation({
@@ -114,18 +114,14 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const handleDigit = useCallback(async (digit: number) => {
     if (!gameState || !selected || isPaused || isSolved) return;
     lightImpact(); playSound('digit_place');
-    setPressedDigit(digit);
-    setTimeout(() => setPressedDigit(null), 120);
+    setPressedDigit(digit); setTimeout(() => setPressedDigit(null), 120);
 
     if (isNotesMode) {
-      // Toggle note
       const cellNotes = new Set(notes[selected] ?? []);
       if (cellNotes.has(digit)) cellNotes.delete(digit); else cellNotes.add(digit);
-      const newNotes = { ...notes, [selected]: Array.from(cellNotes) };
-      updateState({ ...gameState, notes: newNotes }, true);
+      updateState({ ...gameState, notes: { ...notes, [selected]: Array.from(cellNotes) } }, true);
     } else {
-      const newVals = { ...values };
-      const newNotes = { ...notes };
+      const newVals = { ...values }; const newNotes = { ...notes };
       if (digit === 0) { delete newVals[selected]; } else { newVals[selected] = digit; delete newNotes[selected]; }
       updateState({ ...gameState, values: newVals, notes: newNotes }, true);
       await resolveWin(newVals);
@@ -139,28 +135,58 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     for (const { row, col, value } of sol.values) {
       if (!values[`${row},${col}`]) {
         lightImpact(); playSound('hint');
-        const newVals = { ...values, [`${row},${col}`]: value };
-        const newNotes = { ...notes }; delete newNotes[`${row},${col}`];
+        const newVals = { ...values, [`${row},${col}`]: value }; const newNotes = { ...notes }; delete newNotes[`${row},${col}`];
         updateState({ ...gameState, values: newVals, notes: newNotes }, true);
-        await resolveWin(newVals);
-        return;
+        await resolveWin(newVals); return;
       }
     }
   }, [gameState, isPaused, values, notes, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!gameState || !session) return null;
+
   const shareable = generateShareableResult({ gameType: GameType.KAKURO, difficulty: session.difficulty, elapsedSeconds: session.elapsedSeconds, hintsUsed: session.hintsUsed, date: new Date().toISOString().slice(0, 10), isDaily });
+  const actionBg = isDark ? '#1f2937' : '#f3f4f6';
+
+  const notesToggle = (
+    <TouchableOpacity
+      onPress={() => updateState({ ...gameState, isNotesMode: !isNotesMode }, false)}
+      style={[styles.actionBtn, { backgroundColor: isNotesMode ? '#4f46e5' : actionBg, borderColor: isNotesMode ? '#a855f7' : t.border }]}
+      accessibilityLabel="Toggle notes">
+      <Text style={{ fontSize: 16, marginBottom: 2 }}>✏️</Text>
+      <Text style={{ fontFamily: 'SpaceGrotesk-Medium', fontSize: 9, color: isNotesMode ? '#a5b4fc' : t.textMuted }}>Notes</Text>
+    </TouchableOpacity>
+  );
+
+  const numpad = (
+    <View style={styles.numPad}>
+      {[1,2,3,4,5,6,7,8,9].map(d => (
+        <TouchableOpacity key={d} onPress={() => handleDigit(d)} activeOpacity={0.6}
+          style={[styles.numKey, { backgroundColor: pressedDigit === d ? '#a855f7' : t.surface, borderColor: pressedDigit === d ? '#a855f7' : t.border, transform: [{ scale: pressedDigit === d ? 0.92 : 1 }] }]}>
+          <Text style={{ color: pressedDigit === d ? '#fff' : t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 20 }}>{d}</Text>
+        </TouchableOpacity>
+      ))}
+      <TouchableOpacity onPress={() => handleDigit(0)} activeOpacity={0.6} style={[styles.numKey, { backgroundColor: t.surface, borderColor: t.border }]}>
+        <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Bold', fontSize: 18 }}>⌫</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.KAKURO} gameName="Kakuro" accentColor="#a855f7" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable>
+      <GenericGameScreen
+        puzzleId={puzzleId} gameType={GameType.KAKURO} gameName="Kakuro" accentColor="#a855f7"
+        isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed}
+        hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable}
+        onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)}
+        onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable
+        showUndo onUndo={() => { lightImpact(); undo(); }}
+        extraControls={notesToggle} numpad={numpad}
+      >
         <View>
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 8, textAlign: 'center' }}>
             Down clue (top-left) ╲ Across clue (bottom-right)
           </Text>
-
-          {/* Board */}
           <View style={{ borderWidth: 2, borderColor: isDark ? '#374151' : '#6b7280', alignSelf: 'center' }}>
             {grid.map((row, r) => (
               <View key={r} style={{ flexDirection: 'row' }}>
@@ -171,24 +197,13 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
                     const clueFs = Math.max(7, CELL * 0.26);
                     return (
                       <View key={c} style={{ width: CELL, height: CELL, backgroundColor: isDark ? '#1f2937' : '#374151', borderWidth: 0.5, borderColor: isDark ? '#374151' : '#1f2937', overflow: 'hidden' }}>
-                        {/* SVG diagonal line from top-left to bottom-right */}
                         {hasBoth && (
                           <Svg width={CELL} height={CELL} style={StyleSheet.absoluteFill} pointerEvents="none">
                             <Line x1={1} y1={1} x2={CELL - 1} y2={CELL - 1} stroke={isDark ? '#6b7280' : '#9ca3af'} strokeWidth={1} />
                           </Svg>
                         )}
-                        {/* Down clue: top-left triangle */}
-                        {blk.downClue !== null && (
-                          <Text style={{ position: 'absolute', top: 2, left: 3, color: CLR, fontSize: clueFs, fontFamily: 'SpaceGrotesk-Bold', lineHeight: clueFs + 2 }}>
-                            {blk.downClue}
-                          </Text>
-                        )}
-                        {/* Across clue: bottom-right triangle */}
-                        {blk.acrossClue !== null && (
-                          <Text style={{ position: 'absolute', bottom: 2, right: 3, color: CLR, fontSize: clueFs, fontFamily: 'SpaceGrotesk-Bold', lineHeight: clueFs + 2 }}>
-                            {blk.acrossClue}
-                          </Text>
-                        )}
+                        {blk.downClue !== null && <Text style={{ position: 'absolute', top: 2, left: 3, color: CLR, fontSize: clueFs, fontFamily: 'SpaceGrotesk-Bold', lineHeight: clueFs + 2 }}>{blk.downClue}</Text>}
+                        {blk.acrossClue !== null && <Text style={{ position: 'absolute', bottom: 2, right: 3, color: CLR, fontSize: clueFs, fontFamily: 'SpaceGrotesk-Bold', lineHeight: clueFs + 2 }}>{blk.acrossClue}</Text>}
                       </View>
                     );
                   }
@@ -202,7 +217,6 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
                       {val ? (
                         <Text style={{ fontSize: CELL * 0.5, fontFamily: 'SpaceGrotesk-Bold', color: isSelected ? '#a855f7' : t.textPrimary }}>{val}</Text>
                       ) : cellNotes.length > 0 ? (
-                        // Notes grid (3×3)
                         <View style={{ flexWrap: 'wrap', flexDirection: 'row', width: CELL - 4 }}>
                           {[1,2,3,4,5,6,7,8,9].map(n => (
                             <Text key={n} style={{ width: (CELL - 4) / 3, fontSize: Math.max(6, CELL * 0.2), textAlign: 'center', color: cellNotes.includes(n) ? '#a855f7' : 'transparent', fontFamily: 'SpaceGrotesk-Medium', lineHeight: Math.max(7, CELL * 0.22) }}>{n}</Text>
@@ -215,30 +229,6 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
               </View>
             ))}
           </View>
-
-          {/* Controls row: Notes toggle + Undo */}
-          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 16, marginBottom: 4 }}>
-            <TouchableOpacity onPress={() => setIsNotesMode(v => !v)}
-              style={[styles.modeBtn, { backgroundColor: isNotesMode ? '#a855f7' : t.surface2, borderColor: isNotesMode ? '#a855f7' : t.border }]}>
-              <Text style={{ color: isNotesMode ? '#fff' : t.textPrimary, fontFamily: 'SpaceGrotesk-Medium', fontSize: 13 }}>✏️ {isNotesMode ? 'Notes ON' : 'Notes'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => { lightImpact(); undo(); }} style={[styles.modeBtn, { backgroundColor: t.surface2, borderColor: t.border }]}>
-              <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Medium', fontSize: 13 }}>↩ Undo</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Digit pad */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 12, marginBottom: 8 }}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
-              <TouchableOpacity key={d} onPress={() => handleDigit(d)} activeOpacity={0.6}
-                style={[styles.digitKey, { backgroundColor: pressedDigit === d ? '#a855f7' : t.surface2, borderColor: pressedDigit === d ? '#a855f7' : t.border, transform: [{ scale: pressedDigit === d ? 0.93 : 1 }] }]}>
-                <Text style={{ color: pressedDigit === d ? '#fff' : t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 20 }}>{d}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity onPress={() => handleDigit(0)} activeOpacity={0.6} style={[styles.digitKey, { backgroundColor: t.surface2, borderColor: t.border }]}>
-              <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Bold', fontSize: 18 }}>⌫</Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </GenericGameScreen>
       <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All your entries and notes will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); setSelected(null); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
@@ -247,6 +237,7 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 }
 
 const styles = StyleSheet.create({
-  digitKey: { width: 48, height: 48, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  modeBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
+  actionBtn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, minWidth: 56, minHeight: 52, borderWidth: 1 },
+  numPad: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+  numKey: { width: 48, height: 48, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });
