@@ -4,6 +4,7 @@ import { GameType, Difficulty } from '@puzzle-roll/shared';
 
 const PROGRESS_KEY_PREFIX = 'proll_progress_';
 const COMPLETED_KEY = 'proll_completed';
+const DAILY_COMPLETED_KEY = 'proll_daily_completed';
 
 export interface SavedPuzzleProgress {
   puzzleId: string;
@@ -20,6 +21,8 @@ export interface SavedPuzzleProgress {
 
 interface PuzzleProgressState {
   completedPuzzleIds: Set<string>;
+  /** Puzzle IDs completed specifically via the daily route (isDaily = true) */
+  dailyCompletedPuzzleIds: Set<string>;
   inProgressPuzzleIds: Set<string>;
 }
 
@@ -27,14 +30,19 @@ interface PuzzleProgressActions {
   saveProgress: (progress: SavedPuzzleProgress) => Promise<void>;
   loadProgress: (puzzleId: string) => Promise<SavedPuzzleProgress | null>;
   clearProgress: (puzzleId: string) => Promise<void>;
-  markCompleted: (puzzleId: string) => Promise<void>;
+  markCompleted: (puzzleId: string, isDaily?: boolean) => Promise<void>;
   isCompleted: (puzzleId: string) => boolean;
+  /** Returns true only if completed via the daily route */
+  isDailyCompleted: (puzzleId: string) => boolean;
   isInProgress: (puzzleId: string) => boolean;
+  /** Called on login/logout — clears in-memory state and AsyncStorage so it re-hydrates for the new user */
+  resetForUserChange: () => Promise<void>;
 }
 
 export const usePuzzleProgressStore = create<PuzzleProgressState & PuzzleProgressActions>(
   (set, get) => ({
     completedPuzzleIds: new Set(),
+    dailyCompletedPuzzleIds: new Set(),
     inProgressPuzzleIds: new Set(),
 
     saveProgress: async (progress) => {
@@ -64,38 +72,64 @@ export const usePuzzleProgressStore = create<PuzzleProgressState & PuzzleProgres
       });
     },
 
-    markCompleted: async (puzzleId) => {
+    markCompleted: async (puzzleId, isDaily = false) => {
       await AsyncStorage.removeItem(`${PROGRESS_KEY_PREFIX}${puzzleId}`);
-      const { completedPuzzleIds } = get();
-      const updated = new Set([...completedPuzzleIds, puzzleId]);
+      const { completedPuzzleIds, dailyCompletedPuzzleIds } = get();
+
+      const updatedCompleted = new Set([...completedPuzzleIds, puzzleId]);
+      const updatedDaily = isDaily
+        ? new Set([...dailyCompletedPuzzleIds, puzzleId])
+        : dailyCompletedPuzzleIds;
+
       try {
-        await AsyncStorage.setItem(COMPLETED_KEY, JSON.stringify([...updated]));
+        await AsyncStorage.setItem(COMPLETED_KEY, JSON.stringify([...updatedCompleted]));
+        if (isDaily) {
+          await AsyncStorage.setItem(DAILY_COMPLETED_KEY, JSON.stringify([...updatedDaily]));
+        }
       } catch {}
+
       set((s) => {
         const inProg = new Set(s.inProgressPuzzleIds);
         inProg.delete(puzzleId);
-        return { completedPuzzleIds: updated, inProgressPuzzleIds: inProg };
+        return {
+          completedPuzzleIds: updatedCompleted,
+          dailyCompletedPuzzleIds: updatedDaily,
+          inProgressPuzzleIds: inProg,
+        };
       });
     },
 
     isCompleted: (puzzleId) => get().completedPuzzleIds.has(puzzleId),
+    isDailyCompleted: (puzzleId) => get().dailyCompletedPuzzleIds.has(puzzleId),
     isInProgress: (puzzleId) =>
       !get().completedPuzzleIds.has(puzzleId) && get().inProgressPuzzleIds.has(puzzleId),
+
+    resetForUserChange: async () => {
+      set({ completedPuzzleIds: new Set(), dailyCompletedPuzzleIds: new Set(), inProgressPuzzleIds: new Set() });
+      await AsyncStorage.removeItem(COMPLETED_KEY);
+      await AsyncStorage.removeItem(DAILY_COMPLETED_KEY);
+      const allKeys = await AsyncStorage.getAllKeys();
+      const progressKeys = allKeys.filter((k) => k.startsWith(PROGRESS_KEY_PREFIX));
+      if (progressKeys.length > 0) await AsyncStorage.multiRemove(progressKeys);
+    },
   })
 );
 
 export async function hydratePuzzleProgress(): Promise<void> {
   try {
-    const [completedRaw, allKeys] = await Promise.all([
+    const [completedRaw, dailyCompletedRaw, allKeys] = await Promise.all([
       AsyncStorage.getItem(COMPLETED_KEY),
+      AsyncStorage.getItem(DAILY_COMPLETED_KEY),
       AsyncStorage.getAllKeys(),
     ]);
     const completedIds: string[] = completedRaw ? JSON.parse(completedRaw) : [];
+    const dailyCompletedIds: string[] = dailyCompletedRaw ? JSON.parse(dailyCompletedRaw) : [];
     const inProgressIds = (allKeys ?? [])
       .filter((k) => k.startsWith(PROGRESS_KEY_PREFIX))
       .map((k) => k.replace(PROGRESS_KEY_PREFIX, ''));
     usePuzzleProgressStore.setState({
       completedPuzzleIds: new Set(completedIds),
+      dailyCompletedPuzzleIds: new Set(dailyCompletedIds),
       inProgressPuzzleIds: new Set(inProgressIds),
     });
   } catch {}
