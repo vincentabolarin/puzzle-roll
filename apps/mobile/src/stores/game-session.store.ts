@@ -11,7 +11,12 @@ export interface ActiveSession<TState = unknown> {
   completedAt: Date | null;
   hintsUsed: number;
   hintsRemaining: number;
+  /** Integer tick count — kept for display only, incremented every second */
   elapsedSeconds: number;
+  /** Accumulated elapsed seconds from previous play segments (before current resume) */
+  accumulatedSeconds: number;
+  /** Wall-clock timestamp of when the current active segment started (null if paused) */
+  segmentStartMs: number | null;
   isPaused: boolean;
   isSolved: boolean;
   undoStack: TState[];
@@ -31,9 +36,7 @@ interface GameSessionActions {
     isDaily: boolean;
     dailyPuzzleId: string | null;
     initialState: TState;
-    /** Restore elapsed time when resuming a saved session. Defaults to 0. */
     initialElapsedSeconds?: number;
-    /** Restore hints state when resuming a saved session. */
     initialHintsUsed?: number;
     initialHintsRemaining?: number;
   }) => void;
@@ -44,6 +47,7 @@ interface GameSessionActions {
   pauseTimer: () => void;
   resumeTimer: () => void;
   clearSession: () => void;
+  /** Returns real elapsed seconds computed from wall clock — use this for submission */
   getElapsed: () => number;
 }
 
@@ -82,6 +86,8 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
         hintsUsed: initialHintsUsed,
         hintsRemaining: initialHintsRemaining,
         elapsedSeconds: initialElapsedSeconds,
+        accumulatedSeconds: initialElapsedSeconds,
+        segmentStartMs: Date.now(),
         isPaused: false,
         isSolved: false,
         undoStack: [],
@@ -122,18 +128,54 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
   },
 
   markSolved: () => {
-    const { timerInterval } = get();
+    const { timerInterval, session } = get();
     if (timerInterval) clearInterval(timerInterval);
+    // Freeze elapsed at real wall-clock time
+    const realElapsed = session ? get().getElapsed() : 0;
     set((s) => ({
       session: s.session
-        ? { ...s.session, isSolved: true, completedAt: new Date(), isPaused: true }
+        ? {
+            ...s.session,
+            isSolved: true,
+            completedAt: new Date(),
+            isPaused: true,
+            segmentStartMs: null,
+            elapsedSeconds: realElapsed,
+            accumulatedSeconds: realElapsed,
+          }
         : null,
       timerInterval: null,
     }));
   },
 
-  pauseTimer: () => set((s) => ({ session: s.session ? { ...s.session, isPaused: true } : null })),
-  resumeTimer: () => set((s) => ({ session: s.session ? { ...s.session, isPaused: false } : null })),
+  pauseTimer: () => {
+    const { session } = get();
+    if (!session || session.isPaused || session.isSolved) return;
+    const now = Date.now();
+    const segmentSeconds = session.segmentStartMs != null
+      ? Math.floor((now - session.segmentStartMs) / 1000)
+      : 0;
+    const newAccumulated = session.accumulatedSeconds + segmentSeconds;
+    set((s) => ({
+      session: s.session
+        ? {
+            ...s.session,
+            isPaused: true,
+            segmentStartMs: null,
+            accumulatedSeconds: newAccumulated,
+            elapsedSeconds: newAccumulated,
+          }
+        : null,
+    }));
+  },
+
+  resumeTimer: () => {
+    set((s) => ({
+      session: s.session
+        ? { ...s.session, isPaused: false, segmentStartMs: Date.now() }
+        : null,
+    }));
+  },
 
   clearSession: () => {
     const { timerInterval } = get();
@@ -141,5 +183,13 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
     set({ session: null, timerInterval: null });
   },
 
-  getElapsed: () => get().session?.elapsedSeconds ?? 0,
+  getElapsed: () => {
+    const { session } = get();
+    if (!session) return 0;
+    if (session.isPaused || session.isSolved || session.segmentStartMs == null) {
+      return session.accumulatedSeconds;
+    }
+    const segmentSeconds = Math.floor((Date.now() - session.segmentStartMs) / 1000);
+    return session.accumulatedSeconds + segmentSeconds;
+  },
 }));

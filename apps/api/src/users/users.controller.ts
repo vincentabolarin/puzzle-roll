@@ -25,14 +25,14 @@ export class UsersController {
     return this.usersService.getStats(user.sub);
   }
 
-  // @Patch('me/username')
-  // @ApiOperation({ summary: 'Set or update display username (shown on leaderboards)' })
-  // async updateUsername(
-  //   @CurrentUser() user: JwtPayload,
-  //   @Body() dto: UpdateUsernameDto
-  // ) {
-  //   return this.usersService.updateUsername(user.sub, dto);
-  // }
+  @Patch('me/username')
+  @ApiOperation({ summary: 'Set or update display username (shown on leaderboards)' })
+  async updateUsername(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateUsernameDto
+  ) {
+    return this.usersService.updateUsername(user.sub, dto);
+  }
 
   @Delete('me/stats')
   @ApiOperation({ summary: 'Clear stats — all games or a specific game type' })

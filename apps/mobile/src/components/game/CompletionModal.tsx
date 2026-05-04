@@ -10,6 +10,8 @@ interface CompletionModalProps {
   hintsUsed: number;
   isDaily: boolean;
   shareableResult: string;
+  /** Current streak after completion — passed from game onSuccess */
+  streak?: number;
   onClose: () => void;
   onNextPuzzle?: () => void;
 }
@@ -25,7 +27,7 @@ const GAME_LABELS: Partial<Record<GameType, string>> = {
   [GameType.LIGHT_UP]: 'Light Up', [GameType.FUTOSHIKI]: 'Futoshiki', [GameType.HITORI]: 'Hitori',
 };
 
-export default function CompletionModal({ gameType, elapsedSeconds, hintsUsed, isDaily, shareableResult, onClose, onNextPuzzle }: CompletionModalProps) {
+export default function CompletionModal({ gameType, elapsedSeconds, hintsUsed, isDaily, shareableResult, streak, onClose, onNextPuzzle }: CompletionModalProps) {
   const t = useAppTheme();
   const scale = useSharedValue(0.8);
   const opacity = useSharedValue(0);
@@ -39,8 +41,11 @@ export default function CompletionModal({ gameType, elapsedSeconds, hintsUsed, i
     opacity.value = withDelay(100, withTiming(1, { duration: 200 }));
   }, []);
 
+  // If streak is available, rebuild share text with it; otherwise use the pre-built string
+  const shareText = shareableResult;
+
   const handleShare = async () => {
-    try { await Share.share({ message: shareableResult }); } catch {}
+    try { await Share.share({ message: shareText }); } catch {}
   };
 
   return (
@@ -53,6 +58,9 @@ export default function CompletionModal({ gameType, elapsedSeconds, hintsUsed, i
               {isDaily ? 'Daily complete!' : 'Puzzle solved!'}
             </Text>
             <Text style={[styles.subtitle, { color: t.textSecondary }]}>{GAME_LABELS[gameType]}</Text>
+            {isDaily && streak != null && streak > 1 && (
+              <Text style={[styles.streakBadge, { color: '#f97316' }]}>🔥 {streak}-day streak</Text>
+            )}
           </View>
 
           <View style={styles.statsRow}>
@@ -108,6 +116,7 @@ const styles = StyleSheet.create({
   emoji: { fontSize: 52, marginBottom: 10 },
   title: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 24, marginBottom: 4 },
   subtitle: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 14 },
+  streakBadge: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 15, marginTop: 6 },
   statsRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   statBox: { flex: 1, borderRadius: 16, padding: 16, alignItems: 'center' },
   statLabel: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 4 },

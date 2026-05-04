@@ -27,7 +27,6 @@ function formatTime(seconds: number): string {
 }
 
 function buildPerformanceBar(elapsedSeconds: number, hintsUsed: number): string {
-  // 5 blocks: green = completed without hints, yellow = hints used, red = many hints
   const blocks = 5;
   const hintPenalty = Math.min(hintsUsed, blocks);
   const green = blocks - hintPenalty;
@@ -41,8 +40,10 @@ export function generateShareableResult(params: {
   hintsUsed: number;
   date: string;
   isDaily: boolean;
+  /** Current streak for this game — only shown for daily completions */
+  streak?: number;
 }): string {
-  const { gameType, difficulty, elapsedSeconds, hintsUsed, date, isDaily } = params;
+  const { gameType, difficulty, elapsedSeconds, hintsUsed, date, isDaily, streak } = params;
 
   const gameEmoji = GAME_EMOJI[gameType];
   const stars = DIFFICULTY_STARS[difficulty];
@@ -51,11 +52,21 @@ export function generateShareableResult(params: {
   const hintText = hintsUsed === 0 ? 'No hints' : `${hintsUsed} hint${hintsUsed > 1 ? 's' : ''}`;
   const prefix = isDaily ? `Daily ${date}` : difficulty;
 
-  return [
-    `${gameEmoji} Puzzle Roll — ${gameType.charAt(0).toUpperCase() + gameType.slice(1)}`,
+  const gameName = gameType.charAt(0).toUpperCase() + gameType.slice(1).replace(/_/g, ' ');
+
+  const streakLine = isDaily && streak != null && streak > 1
+    ? `🔥 ${streak}-day streak`
+    : null;
+
+  const lines = [
+    `${gameEmoji} Puzzle Roll — ${gameName}`,
     `${prefix} ${stars}`,
     bar,
     `⏱️ ${time} | ${hintText}`,
-    `puzzleroll.com`,
-  ].join('\n');
+  ];
+
+  if (streakLine) lines.push(streakLine);
+  lines.push('puzzleroll.com');
+
+  return lines.join('\n');
 }

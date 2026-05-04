@@ -37,7 +37,8 @@ async function refreshAccessToken(): Promise<string | null> {
     try {
       const { refreshToken, updateAccessToken, clearSession } = useAuthStore.getState();
       if (!refreshToken) {
-        await clearSession();
+        // No refresh token means we are in a transitional state (logout in progress).
+        // Return null immediately — caller will receive an auth error but no retry loop.
         return null;
       }
 

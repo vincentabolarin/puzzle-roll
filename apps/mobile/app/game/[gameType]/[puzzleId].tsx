@@ -3,7 +3,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorBoundary } from 'react-error-boundary';
-import { GameType } from '@puzzle-roll/shared';
+import { Difficulty, GameType } from '@puzzle-roll/shared';
 import { apiClient } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-client';
 import { puzzleCache } from '@/services/puzzle-cache.service';
@@ -27,6 +27,8 @@ type GameProps = {
   isDaily: boolean;
   dailyPuzzleId: string | null;
   onNextPuzzle?: () => void;
+  puzzleNumber?: number;
+  difficulty?: Difficulty;
 };
 
 const GAME_COMPONENTS: Partial<Record<GameType, React.ComponentType<GameProps>>> = {
@@ -78,22 +80,27 @@ export default function ActivePuzzleScreen() {
     enabled: !!puzzleId,
   });
 
-  const { data: puzzleList } = useQuery({
+  const { data: puzzleListResponse } = useQuery({
     queryKey: [...queryKeys.puzzles.byGame(gameType ?? ''), data?.difficulty],
     queryFn: () =>
-      apiClient.get<Array<{ id: string }>>(`/puzzles/${gameType}?difficulty=${data!.difficulty}&limit=50`),
+      apiClient.get<{ data: Array<{ id: string }> }>(`/puzzles/${gameType}?difficulty=${data!.difficulty}&limit=50`),
     enabled: !!data?.difficulty,
     staleTime: 5 * 60 * 1000,
   });
 
+  const puzzleList = puzzleListResponse?.data;
+
   const gt = (gameType ?? '') as GameType;
   const GameComponent = GAME_COMPONENTS[gt];
 
+  const puzzleIndex = puzzleList ? puzzleList.findIndex((p) => p.id === puzzleId) : -1;
+  const puzzleNumber = puzzleIndex >= 0 ? puzzleIndex + 1 : undefined;
+  const nextPuzzle = puzzleList && puzzleIndex >= 0 ? puzzleList[(puzzleIndex + 1) % puzzleList.length] : null;
+  const hasNextPuzzle = !!(nextPuzzle && nextPuzzle.id !== puzzleId);
+
   const handleNextPuzzle = () => {
-    if (!puzzleList || !puzzleId) return;
-    const idx = puzzleList.findIndex((p) => p.id === puzzleId);
-    const next = puzzleList[(idx + 1) % puzzleList.length];
-    if (next && next.id !== puzzleId) router.replace(`/game/${gt}/${next.id}`);
+    if (!nextPuzzle) return;
+    router.replace(`/game/${gt}/${nextPuzzle.id}`);
   };
 
   if (isLoading) {
@@ -140,7 +147,9 @@ export default function ActivePuzzleScreen() {
             solution={null}
             isDaily={false}
             dailyPuzzleId={null}
-            onNextPuzzle={puzzleList && puzzleList.length > 1 ? handleNextPuzzle : undefined}
+            puzzleNumber={puzzleNumber}
+            difficulty={data.difficulty as Difficulty}
+            onNextPuzzle={hasNextPuzzle ? handleNextPuzzle : undefined}
           />
         </View>
       </ErrorBoundary>

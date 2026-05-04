@@ -1,6 +1,6 @@
 # Puzzle Roll
 
-A premium cross-platform puzzle app for iOS, Android, and Web featuring 10 daily logic puzzle games. Built with Expo React Native, NestJS, and PostgreSQL.
+A premium cross-platform puzzle app for iOS, Android, and Web featuring daily logic puzzle games. Built with Expo React Native, NestJS, and PostgreSQL.
 
 ---
 
