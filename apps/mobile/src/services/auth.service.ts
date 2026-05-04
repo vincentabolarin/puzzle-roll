@@ -1,6 +1,7 @@
 import { apiClient } from '../lib/api-client';
 import { useAuthStore } from '../stores/auth.store';
 import { usePuzzleProgressStore } from '../stores/puzzle-progress.store';
+import { queryClient } from '../lib/query-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface AuthResponse {
@@ -91,6 +92,11 @@ export const authService = {
       result.accessToken,
       result.refreshToken
     );
+    await usePuzzleProgressStore.getState().resetForUserChange();
+    queryClient.resetQueries({ queryKey: ['user'] });
+    queryClient.resetQueries({ queryKey: ['leaderboard'] });
+    queryClient.resetQueries({ queryKey: ['daily-statuses'] });
+    mergeProgressOnLogin(result.userId).catch(() => {});
   },
 
   async login(email: string, password: string): Promise<void> {
@@ -105,7 +111,15 @@ export const authService = {
       result.accessToken,
       result.refreshToken
     );
-    // Merge progress after login — non-blocking
+    // Reset local progress state so it re-hydrates from cloud
+    await usePuzzleProgressStore.getState().resetForUserChange();
+    // Invalidate all user-specific queries so they immediately refetch with the new user
+    // resetQueries removes cached data entirely — works even when queries have no active subscribers
+    // (invalidateQueries only refetches active queries, so profile tab would miss it if unmounted)
+    queryClient.resetQueries({ queryKey: ['user'] });
+    queryClient.resetQueries({ queryKey: ['leaderboard'] });
+    queryClient.resetQueries({ queryKey: ['daily-statuses'] });
+    // Merge cloud progress into local store — non-blocking
     mergeProgressOnLogin(result.userId).catch(() => {});
   },
 
@@ -137,5 +151,13 @@ export const authService = {
   async logout(): Promise<void> {
     const { clearSession } = useAuthStore.getState();
     await clearSession();
+    // Reset local progress — clears completedPuzzleIds so daily badges reset
+    await usePuzzleProgressStore.getState().resetForUserChange();
+    // Create anonymous session FIRST so there is always a valid token before clearing the cache.
+    // If we cleared the cache first, React Query would immediately refetch queries with no token,
+    // causing 401 errors in the api-client refresh loop.
+    await authService.createAnonymousSession();
+    // Now safe to wipe the cache — new anonymous token is already in the auth store
+    queryClient.clear();
   },
 };

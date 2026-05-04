@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Modal, PanResponder } from 'react-native';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../lib/query-client';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -19,18 +20,20 @@ import ConfirmModal from '../ui/ConfirmModal';
 interface NonogramData { size: number; rowClues: number[][]; colClues: number[][] }
 type Cell = 'empty' | 'filled' | 'marked';
 interface NGState { board: Cell[][] }
-interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void }
+interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void; puzzleNumber?: number; difficulty?: string }
 
-export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: Props) {
+export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
   const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
+  const queryClient = useQueryClient();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
   const isDark = t.background !== '#f9fafb';
   const [isSolved, setIsSolved] = useState(false);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -76,11 +79,25 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     return () => clearInterval(iv);
   }, [initialized, session?.isSolved]);
 
+
+  // Save progress on unmount (covers back-navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      saveProgress({ puzzleId, gameType: GameType.NONOGRAM, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: useGameSessionStore.getState().getElapsed(), hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
   const gameState = session?.currentState as NGState | undefined;
   const board = gameState?.board;
   const isPaused = session?.isPaused ?? false;
 
-  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.NONOGRAM, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onError: (_, v) => enqueue({ puzzleId, gameType: GameType.NONOGRAM, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
+  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.NONOGRAM, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(session?.gameType ?? '') });
+    },
+    onError: (_, v) => enqueue({ puzzleId, gameType: GameType.NONOGRAM, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
 
   function computeClues(line: boolean[]): number[] {
     const clues: number[] = []; let count = 0;
@@ -99,10 +116,10 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     markSolved(); setIsSolved(true); successNotification(); playSound('complete');
     const sol = await loadSolution(); setSolution(sol);
     setTimeout(() => setShowSolution(true), 800);
-    const elapsed = currentSession.elapsedSeconds, hints = currentSession.hintsUsed;
+    const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
     const shareable = generateShareableResult({ gameType: GameType.NONOGRAM, difficulty: currentSession.difficulty, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
     submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-    await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.NONOGRAM); await showInterstitialIfDue();
+    await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.NONOGRAM); await showInterstitialIfDue();
   }
 
   const handleCellTap = useCallback(async (r: number, c: number) => {
@@ -191,7 +208,7 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
         isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed}
         hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable}
         onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)}
-        onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable
+        onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle} scrollable
         showUndo onUndo={() => { lightImpact(); undo(); }}
       >
         <View {...panResponder.panHandlers}>

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withSequence } from 'react-native-reanimated';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../lib/query-client';
 import { SudokuEngine, GameType, Difficulty } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -29,6 +30,8 @@ interface SudokuGameProps {
   puzzleData: unknown;
   isDaily: boolean;
   dailyPuzzleId: string | null;
+  puzzleNumber?: number;
+  difficulty?: string;
   onNextPuzzle?: () => void;
 }
 
@@ -108,7 +111,7 @@ function CellView({ cell, row, col, isSelected, isHighlighted, cellSize, onPress
   );
 }
 
-export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: SudokuGameProps) {
+export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: SudokuGameProps) {
   const { session, startSession, updateState, undo, useHint, markSolved, pauseTimer, resumeTimer } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
@@ -116,6 +119,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const { boardSize, cellSize } = useGameBoardSize(9);
   const { autoRemoveNotes } = useSettingsStore();
   const { enqueue } = useOfflineQueueStore();
+  const queryClient = useQueryClient();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const t = useAppTheme();
   const isDark = t.background !== '#f9fafb';
@@ -126,6 +130,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const [initialized, setInitialized] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [pressedDigit, setPressedDigit] = useState<number | null>(null);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
 
   const completionScale = useSharedValue(1);
   const completionStyle = useAnimatedStyle(() => ({ transform: [{ scale: completionScale.value }] }));
@@ -169,6 +174,16 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     return () => clearInterval(iv);
   }, [initialized, session?.isSolved, doSaveProgress]);
 
+
+  // Save progress on unmount (covers back-navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      saveProgress({ puzzleId, gameType: GameType.SUDOKU, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: useGameSessionStore.getState().getElapsed(), hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
   const gameState = session?.currentState as (SudokuEngine.SudokuGameState & { board: ExtendedBoard }) | undefined;
   const board = gameState?.board as ExtendedBoard | undefined;
   const selectedCell = gameState?.selectedCell;
@@ -178,6 +193,15 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const { mutate: submitCompletion } = useMutation({
     mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) =>
       apiClient.post('/progress/complete', { puzzleId, gameType: GameType.SUDOKU, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }),
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(session?.gameType ?? '') });
+      try {
+        const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats');
+        const s = stats.find(x => x.gameType === GameType.SUDOKU);
+        if (s) setStreak(s.currentStreak);
+      } catch {}
+    },
     onError: (_, v) => enqueue({ puzzleId, gameType: GameType.SUDOKU, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }),
   });
 
@@ -185,10 +209,10 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     if (!SudokuEngine.isBoardSolved(currentBoard, sol)) return;
     markSolved(); successNotification(); playSound('complete');
     completionScale.value = withSequence(withSpring(1.05), withSpring(1));
-    const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
+    const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
     const shareable = generateShareableResult({ gameType: GameType.SUDOKU, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
     submitCompletion({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-    await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.SUDOKU); await showInterstitialIfDue();
+    await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.SUDOKU); await showInterstitialIfDue();
   }
 
   const handleCellPress = useCallback((row: number, col: number) => {
@@ -405,7 +429,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       {session.isSolved && (
         <CompletionModal gameType={GameType.SUDOKU} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} isDaily={isDaily}
           shareableResult={generateShareableResult({ gameType: GameType.SUDOKU, difficulty: session.difficulty, elapsedSeconds: session.elapsedSeconds, hintsUsed: session.hintsUsed, date: new Date().toISOString().slice(0, 10), isDaily })}
-          onClose={() => router.back()} onNextPuzzle={onNextPuzzle} />
+          streak={streak} onClose={() => router.back()} onNextPuzzle={onNextPuzzle} />
       )}
     </View>
   );

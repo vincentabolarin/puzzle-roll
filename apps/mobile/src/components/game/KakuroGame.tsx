@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import Svg, { Line } from 'react-native-svg';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../lib/query-client';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -22,18 +23,20 @@ interface KWhiteCell { type: 'white'; value: number }
 type KCell = KBlackCell | KWhiteCell;
 interface KakuroPuzzleData { size: number; grid: KCell[][] }
 interface KakuroState { values: Record<string, number>; notes: Record<string, number[]>; isNotesMode: boolean }
-interface KakuroProps { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void }
+interface KakuroProps { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void; puzzleNumber?: number; difficulty?: string; }
 
-export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: KakuroProps) {
+export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: KakuroProps) {
   const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
+  const queryClient = useQueryClient();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
   const isDark = t.background !== '#f9fafb';
   const [isSolved, setIsSolved] = useState(false);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -71,6 +74,16 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     return () => clearInterval(iv);
   }, [initialized, session?.isSolved]);
 
+
+  // Save progress on unmount (covers back-navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      saveProgress({ puzzleId, gameType: GameType.KAKURO, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: useGameSessionStore.getState().getElapsed(), hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
   const gameState = session?.currentState as KakuroState | undefined;
   const values = gameState?.values ?? {};
   const notes = gameState?.notes ?? {};
@@ -80,6 +93,10 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const { mutate: submit } = useMutation({
     mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) =>
       apiClient.post('/progress/complete', { puzzleId, gameType: GameType.KAKURO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(session?.gameType ?? '') });
+    },
     onError: (_, v) => enqueue({ puzzleId, gameType: GameType.KAKURO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }),
   });
 
@@ -104,10 +121,10 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   async function resolveWin(newVals: Record<string, number>) {
     if (checkKakuroSolved(newVals)) {
       markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-      const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
+      const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.KAKURO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-      await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.KAKURO); await showInterstitialIfDue();
+      await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.KAKURO); await showInterstitialIfDue();
     }
   }
 
@@ -179,7 +196,7 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
         isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed}
         hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable}
         onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)}
-        onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable
+        onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle} scrollable
         showUndo onUndo={() => { lightImpact(); undo(); }}
         extraControls={notesToggle} numpad={numpad}
       >

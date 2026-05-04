@@ -13,6 +13,7 @@
     "type-check": "turbo run type-check",
     "db:generate": "pnpm --filter @puzzle-roll/database db:generate",
     "db:migrate": "pnpm --filter @puzzle-roll/database db:migrate",
+    "db:migrate:deploy": "pnpm --filter @puzzle-roll/database db:migrate:deploy",
     "db:seed": "pnpm --filter @puzzle-roll/database db:seed",
     "db:reset": "pnpm --filter @puzzle-roll/database db:reset",
     "db:studio": "pnpm --filter @puzzle-roll/database db:studio"

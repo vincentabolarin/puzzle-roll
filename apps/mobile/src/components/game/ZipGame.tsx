@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
 import Svg, { Polyline } from 'react-native-svg';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -10,6 +10,7 @@ import { usePuzzleProgressStore, SavedPuzzleProgress } from '../../stores/puzzle
 import { useOfflineQueueStore } from '../../stores/offline-queue.store';
 import { useAppTheme } from '../../hooks/useAppTheme';
 import { apiClient } from '../../lib/api-client';
+import { queryKeys } from '../../lib/query-client';
 import { puzzleCache } from '../../services/puzzle-cache.service';
 import { generateShareableResult } from '../../lib/shareable-result';
 import { playSound } from '../../services/sound.service';
@@ -24,17 +25,19 @@ interface ZipCell { number: number | null }
 interface ZipPuzzleData { size: number; grid: ZipCell[][] }
 type PathPt = { row: number; col: number };
 interface ZipState { path: PathPt[] }
-interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null }
+interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void; puzzleNumber?: number; difficulty?: string }
 
-export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }: Props) {
+export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
   const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
+  const queryClient = useQueryClient();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
   const [isSolved, setIsSolved] = useState(false);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -85,6 +88,21 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }
   function continueFromSave() { startSession({ puzzleId, gameType: GameType.ZIP, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: (savedData?.currentState ?? buildInitial()) as ZipState, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 }); setInitialized(true); }
   const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: typeof solution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
+
+  // Save progress on unmount (covers back-navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      usePuzzleProgressStore.getState().saveProgress({
+        puzzleId, gameType: GameType.ZIP, difficulty: s.difficulty, isDaily, dailyPuzzleId,
+        elapsedSeconds: useGameSessionStore.getState().getElapsed(),
+        hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining,
+        currentState: s.currentState, savedAt: Date.now(),
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;
     const iv = setInterval(() => { const s = useGameSessionStore.getState().session; if (!s || s.isSolved) return; saveProgress({ puzzleId, gameType: GameType.ZIP, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: s.elapsedSeconds, hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() }); }, 10000);
@@ -139,10 +157,10 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }
       for (const p of newPath) { const n = grid[p.row][p.col].number; if (n !== null) { if (n !== last + 1) { ok = false; break; } last = n; } }
       if (ok) {
         markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-        const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
+        const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
         const shareable = generateShareableResult({ gameType: GameType.ZIP, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
         submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-        await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.ZIP); await showInterstitialIfDue();
+        await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.ZIP); await showInterstitialIfDue();
       }
     }
   }
@@ -221,7 +239,7 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.ZIP} gameName="Zip" accentColor="#f59e0b" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint}>
+      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.ZIP} gameName="Zip" accentColor="#f59e0b" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle}>
         <View style={{ alignItems: 'center' }}>
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 6, textAlign: 'center' }}>
             Drag your finger to draw the path through 1 → 2 → 3…

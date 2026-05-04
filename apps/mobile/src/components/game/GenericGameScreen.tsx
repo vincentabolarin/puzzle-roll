@@ -26,6 +26,12 @@ interface GenericGameScreenProps {
   onGetHint: () => void;
   onClose?: () => void;
   onNextPuzzle?: () => void;
+  /** Streak for this game after completion, from onSuccess */
+  streak?: number;
+  /** 1-based puzzle number shown in header subtitle */
+  puzzleNumber?: number;
+  /** Difficulty label shown in header subtitle */
+  difficulty?: string;
   scrollable?: boolean;
   // Optional extra actions shown in the control bar between Undo and Hint
   // e.g. Notes toggle for Futoshiki/Kakuro
@@ -42,6 +48,9 @@ export default function GenericGameScreen({
   isSolved, elapsedSeconds, hintsUsed, hintsRemaining,
   isPaused, isDaily, shareableResult,
   onPauseToggle, onReset, onGetHint, onClose, onNextPuzzle,
+  streak,
+  puzzleNumber,
+  difficulty,
   scrollable = false,
   extraControls,
   showUndo = false,
@@ -102,21 +111,33 @@ export default function GenericGameScreen({
 
   return (
     <View style={[styles.root, { backgroundColor: t.background }]}>
-      {/* Header: back ← | timer | pause */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} accessibilityLabel="Go back">
-          <Text style={[styles.backText, { color: t.textSecondary }]}>←</Text>
-        </TouchableOpacity>
+      {/* Header */}
+      <View style={[styles.headerWrap, { borderBottomColor: t.borderSubtle }]}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} accessibilityLabel="Go back">
+            <Text style={[styles.backText, { color: t.textSecondary }]}>←</Text>
+          </TouchableOpacity>
 
-        <GameTimer />
+          <View style={styles.headerCenter}>
+            <Text style={[styles.headerTitle, { color: t.textPrimary }]} numberOfLines={1}>{gameName}</Text>
+            {(difficulty || puzzleNumber != null) && (
+              <Text style={[styles.headerSub, { color: t.textMuted }]}>
+                {[difficulty && difficulty.charAt(0).toUpperCase() + difficulty.slice(1).toLowerCase(), puzzleNumber != null && `#${puzzleNumber}`].filter(Boolean).join('  ·  ')}
+              </Text>
+            )}
+          </View>
 
-        <TouchableOpacity
-          onPress={onPauseToggle}
-          style={[styles.iconBtn, { backgroundColor: t.surface2 }]}
-          accessibilityLabel={isPaused ? 'Resume' : 'Pause'}
-        >
-          <Text style={[styles.pauseIcon, { color: iconColor }]}>{isPaused ? '▶' : '⏸'}</Text>
-        </TouchableOpacity>
+          <View style={styles.headerRight}>
+            <GameTimer />
+            <TouchableOpacity
+              onPress={onPauseToggle}
+              style={[styles.iconBtn, { backgroundColor: t.surface2 }]}
+              accessibilityLabel={isPaused ? 'Resume' : 'Pause'}
+            >
+              <Text style={[styles.pauseIcon, { color: iconColor }]}>{isPaused ? '▶' : '⏸'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
 
       {boardContent}
@@ -139,6 +160,7 @@ export default function GenericGameScreen({
           shareableResult={shareableResult}
           onClose={handleClose}
           onNextPuzzle={onNextPuzzle}
+          streak={streak}
         />
       )}
     </View>
@@ -147,11 +169,16 @@ export default function GenericGameScreen({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  headerWrap: { borderBottomWidth: StyleSheet.hairlineWidth },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingVertical: 10, paddingTop: 14,
+    paddingHorizontal: 12, paddingVertical: 8, paddingTop: 10,
   },
   headerBtn: { padding: 8, minWidth: 40, minHeight: 40, justifyContent: 'center', alignItems: 'center' },
+  headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
+  headerTitle: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 15, lineHeight: 18 },
+  headerSub: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 10, marginTop: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   iconBtn: { padding: 8, minWidth: 40, minHeight: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
   backText: { fontSize: 22 },
   pauseIcon: { fontSize: 16 },

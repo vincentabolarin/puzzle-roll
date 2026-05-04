@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GameType, Difficulty, MinesweeperEngine } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -8,13 +8,16 @@ import { useAdMob } from '../../hooks/useAdMob';
 import { usePuzzleProgressStore, SavedPuzzleProgress } from '../../stores/puzzle-progress.store';
 import { useOfflineQueueStore } from '../../stores/offline-queue.store';
 import { useAppTheme } from '../../hooks/useAppTheme';
-import { apiClient } from '../../lib/api-client';
+
 import { puzzleCache } from '../../services/puzzle-cache.service';
-import { generateShareableResult } from '../../lib/shareable-result';
+
 import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { apiClient } from '@/lib/api-client';
+import { queryKeys } from '@/lib/query-client';
+import { generateShareableResult } from '@/lib/shareable-result';
 
 type MSCell = MinesweeperEngine.MinesweeperCell;
 type MSGameState = MinesweeperEngine.MinesweeperGameState;
@@ -26,24 +29,36 @@ interface Props {
   isDaily: boolean;
   dailyPuzzleId: string | null;
   onNextPuzzle?: () => void;
+  puzzleNumber?: number;
+  difficulty?: Difficulty;
 }
 
 const NUM_COLORS = ['', '#3b82f6', '#22c55e', '#ef4444', '#7c3aed', '#dc2626', '#0891b2', '#111827', '#6b7280'];
 
-export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: Props) {
+export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
   const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, mediumImpact, successNotification, errorNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
+  const queryClient = useQueryClient();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
   const isDark = t.background !== '#f9fafb';
   const [isSolved, setIsSolved] = useState(false);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(msg: string) {
+    setToastMsg(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(null), 2500);
+  }
 
   // Guard: puzzleData might not be loaded yet
   if (!puzzleData) return null;
@@ -78,6 +93,21 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
     setInitialized(true);
   }
 
+
+  // Save progress on unmount (covers back-navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      usePuzzleProgressStore.getState().saveProgress({
+        puzzleId, gameType: GameType.MINESWEEPER, difficulty: s.difficulty, isDaily, dailyPuzzleId,
+        elapsedSeconds: useGameSessionStore.getState().getElapsed(),
+        hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining,
+        currentState: s.currentState, savedAt: Date.now(),
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;
     const iv = setInterval(() => {
@@ -95,15 +125,24 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
   const { mutate: submit } = useMutation({
     mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) =>
       apiClient.post('/progress/complete', { puzzleId, gameType: GameType.MINESWEEPER, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }),
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.MINESWEEPER) });
+      try {
+        const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats');
+        const s = stats.find(x => x.gameType === GameType.MINESWEEPER);
+        if (s) setStreak(s.currentStreak);
+      } catch {}
+    },
     onError: (_, v) => enqueue({ puzzleId, gameType: GameType.MINESWEEPER, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }),
   });
 
   async function handleWin(newBoard: MSCell[][]) {
     markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-    const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
+    const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
     const shareable = generateShareableResult({ gameType: GameType.MINESWEEPER, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
     submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-    await markCompleted(puzzleId);
+    await markCompleted(puzzleId, isDaily);
     await puzzleCache.markCompleted(puzzleId, GameType.MINESWEEPER);
     await showInterstitialIfDue();
   }
@@ -159,10 +198,14 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
   }, [gameState, isPaused, isSolved, mediumImpact, updateState]);
 
   const handleHint = useCallback(async () => {
-    if (!gameState || isPaused || !gameState.minesPlaced) return;
-    const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
+    if (!gameState || isPaused) return;
+    if (!gameState.minesPlaced) {
+      showToast('Reveal a cell first, then use a hint 💡');
+      return;
+    }
     const hint = MinesweeperEngine.getHint(gameState);
-    if (!hint) return;
+    if (!hint) { showToast('No hint available right now'); return; }
+    const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     lightImpact(); playSound('hint');
     updateState(hint.revealedState as MSGameState);
     if (hint.revealedState.isWon) await handleWin(hint.revealedState.board as MSCell[][]);
@@ -176,8 +219,13 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.MINESWEEPER} gameName="Minesweeper" accentColor="#ef4444" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable>
+      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.MINESWEEPER} gameName="Minesweeper" accentColor="#ef4444" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle} scrollable>
         <View>
+          {toastMsg && (
+            <View style={{ backgroundColor: '#1e3a5f', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 8, alignSelf: 'center' }}>
+              <Text style={{ color: '#93c5fd', fontFamily: 'SpaceGrotesk-Medium', fontSize: 12, textAlign: 'center' }}>{toastMsg}</Text>
+            </View>
+          )}
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 4, textAlign: 'center' }}>
             Tap: reveal · Long-press: flag 🚩 · Mines left: {minesLeft}
           </Text>

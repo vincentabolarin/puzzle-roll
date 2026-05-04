@@ -63,6 +63,8 @@ export default function ProfileScreen() {
     enabled: !!user,
     // Refetch stats whenever the screen re-mounts (e.g. after completing a daily puzzle)
     refetchOnMount: true,
+    // refetchOnWindowFocus: true,
+    // staleTime: 0
   });
 
   const handleLogout = async () => {

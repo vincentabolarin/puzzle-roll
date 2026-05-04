@@ -66,7 +66,9 @@ export default function LeaderboardScreen() {
             </View>
           )}
           <View style={[styles.table, { borderColor: t.borderSubtle, backgroundColor: t.surface }]}>
-            {(data?.entries ?? []).map((entry) => (
+            {(data?.entries ?? [])
+              .filter((entry) => !data?.userEntry || entry.userId !== data.userEntry.userId)
+              .map((entry) => (
               <EntryRow key={entry.userId} entry={entry} isCurrentUser={entry.userId === user?.id} t={t} />
             ))}
             {(data?.entries ?? []).length === 0 && (

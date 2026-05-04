@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../lib/query-client';
 import { GameType, Difficulty, FutoshikiEngine } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -26,18 +27,20 @@ interface FutoshikiState extends FutoshikiGameState {
   isNotesMode: boolean;
 }
 
-interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void }
+interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void; puzzleNumber?: number; difficulty?: string }
 
-export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: Props) {
+export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
   const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
+  const queryClient = useQueryClient();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
   const isDark = t.background !== '#f9fafb';
   const [isSolved, setIsSolved] = useState(false);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -78,6 +81,16 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     return () => clearInterval(iv);
   }, [initialized, session?.isSolved]);
 
+
+  // Save progress on unmount (covers back-navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      saveProgress({ puzzleId, gameType: GameType.FUTOSHIKI, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: useGameSessionStore.getState().getElapsed(), hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
   const gameState = session?.currentState as FutoshikiState | undefined;
   const board = gameState?.board;
   const selectedCell = gameState?.selectedCell;
@@ -85,7 +98,11 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
   const isNotesMode = gameState?.isNotesMode ?? false;
   const isPaused = session?.isPaused ?? false;
 
-  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onError: (_, v) => enqueue({ puzzleId, gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
+  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(session?.gameType ?? '') });
+    },
+    onError: (_, v) => enqueue({ puzzleId, gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
 
   function revalidate(nb: number[][]) {
     const result = FutoshikiEngine.validateFutoshikiBoard(nb, size, constraints);
@@ -99,10 +116,10 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     const sol = await loadSolution();
     if (sol && FutoshikiEngine.isFutoshikiSolved(nb, sol)) {
       markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-      const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
+      const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-      await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.FUTOSHIKI); await showInterstitialIfDue();
+      await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.FUTOSHIKI); await showInterstitialIfDue();
     }
   }
 
@@ -175,7 +192,8 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     );
     if (!con) return null;
     const dir = con.row1 === r && con.col1 === c ? con.direction : (con.direction === '<' ? '>' : '<');
-    return dir === '<' ? '∨' : '∧';
+    // return dir === '<' ? '∨' : '∧';
+    return dir;
   }
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
@@ -217,7 +235,7 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
         isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed}
         hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable}
         onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)}
-        onGetHint={handleHint} onNextPuzzle={onNextPuzzle} scrollable
+        onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle} scrollable
         showUndo onUndo={() => { lightImpact(); undo(); }}
         extraControls={notesToggle} numpad={numpad}
       >

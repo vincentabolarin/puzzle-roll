@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet, Modal } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet, Modal } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,6 +9,7 @@ import { queryKeys } from '../../../src/lib/query-client';
 import { puzzleCache } from '../../../src/services/puzzle-cache.service';
 import { usePuzzleProgressStore } from '../../../src/stores/puzzle-progress.store';
 import { useAppTheme } from '../../../src/hooks/useAppTheme';
+import { useNetworkStatus } from '../../../src/hooks/useNetworkStatus';
 
 const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   [Difficulty.EASY]: 'Easy', [Difficulty.MEDIUM]: 'Medium',
@@ -91,16 +92,22 @@ export default function GameLobbyScreen() {
   const { gameType } = useLocalSearchParams<{ gameType: GameType }>();
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(Difficulty.MEDIUM);
   const [showDailyResult, setShowDailyResult] = useState(false);
-  const { isCompleted, isInProgress } = usePuzzleProgressStore();
+  // Subscribe to the sets directly so the component re-renders when they change
+  const completedPuzzleIds = usePuzzleProgressStore(s => s.completedPuzzleIds);
+  const dailyCompletedPuzzleIds = usePuzzleProgressStore(s => s.dailyCompletedPuzzleIds);
+  const inProgressPuzzleIds = usePuzzleProgressStore(s => s.inProgressPuzzleIds);
+  const isCompleted = (id: string) => completedPuzzleIds.has(id);
+  const isDailyCompleted = (id: string) => dailyCompletedPuzzleIds.has(id);
+  const isInProgress = (id: string) => !completedPuzzleIds.has(id) && inProgressPuzzleIds.has(id);
   const t = useAppTheme();
   const isDark = t.background !== '#f9fafb';
   const queryClient = useQueryClient();
 
   const gameName = (gameType ?? '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const { isConnected } = useNetworkStatus();
 
-  // Read cached daily data BEFORE the query to determine staleTime without circular reference
   const cachedDaily = queryClient.getQueryData<DailyData>(queryKeys.puzzles.daily(gameType ?? ''));
-  const dailyAlreadyPlayed = !!cachedDaily && isCompleted(cachedDaily.puzzle.id);
+  const dailyAlreadyPlayed = !!cachedDaily && isDailyCompleted(cachedDaily.puzzle.id);
 
   const { data: daily } = useQuery<DailyData | null>({
     queryKey: queryKeys.puzzles.daily(gameType ?? ''),
@@ -114,14 +121,19 @@ export default function GameLobbyScreen() {
       catch { return null; }
     },
     enabled: !!gameType,
-    // Avoid self-reference: use the value read from cache before the query declaration
     staleTime: dailyAlreadyPlayed ? Infinity : 1000 * 60 * 5,
   });
 
-  const dailyPlayed = !!daily && isCompleted(daily.puzzle.id);
+  const dailyPlayed = !!daily && isDailyCompleted(daily.puzzle.id);
 
-  // FIXED: backend uses page= (1-based), not offset=
-  const { data: puzzlePages, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+  const {
+    data: puzzlePages,
+    isLoading,
+    isError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: queryKeys.puzzles.list(gameType ?? '', selectedDifficulty),
     queryFn: async ({ pageParam = 1 }) => {
       const page = pageParam as number;
@@ -135,7 +147,6 @@ export default function GameLobbyScreen() {
           };
         }
       }
-      // Backend DTO: page (1-based), limit — NO offset param
       const result = await apiClient.get<{ data: PuzzleListItem[]; hasMore: boolean }>(
         `/puzzles/${gameType}?difficulty=${selectedDifficulty}&limit=${PAGE_SIZE}&page=${page}`
       );
@@ -149,6 +160,120 @@ export default function GameLobbyScreen() {
 
   const puzzles = puzzlePages?.pages.flatMap(p => p.items) ?? [];
 
+  // ─── FlatList items: we prefix with a daily card item and a difficulty-tabs item ───
+  type ListItem =
+    | { kind: 'daily' }
+    | { kind: 'tabs' }
+    | { kind: 'error' }
+    | { kind: 'empty' }
+    | { kind: 'offline-end' }
+    | { kind: 'puzzle'; puzzle: PuzzleListItem; index: number };
+
+  const listItems: ListItem[] = [];
+  if (daily != null) listItems.push({ kind: 'daily' });
+  listItems.push({ kind: 'tabs' });
+  if (isError) listItems.push({ kind: 'error' });
+  if (!isLoading && puzzles.length === 0 && !isError) listItems.push({ kind: 'empty' });
+  puzzles.forEach((puzzle, index) => listItems.push({ kind: 'puzzle', puzzle, index }));
+  // Offline banner at end of list when there are no more cached puzzles to load
+  if (!hasNextPage && !isFetchingNextPage && !isConnected && puzzles.length > 0) {
+    listItems.push({ kind: 'offline-end' } as ListItem);
+  }
+
+  const renderItem = ({ item }: { item: ListItem }) => {
+    if (item.kind === 'daily') {
+      return (
+        <TouchableOpacity
+          onPress={() => dailyPlayed ? setShowDailyResult(true) : router.push(`/game/${gameType}/daily` as never)}
+          style={[styles.dailyCard, { backgroundColor: t.surface, borderColor: dailyPlayed ? '#16a34a55' : t.accent + '55' }]}
+          accessibilityLabel={dailyPlayed ? 'View your daily result' : "Play today's daily puzzle"}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.dailyTitle, { color: dailyPlayed ? '#4ade80' : t.accent }]}>
+              {dailyPlayed ? '✓ Daily completed' : "Today's Daily"}
+            </Text>
+            <Text style={[styles.dailyDesc, { color: t.textSecondary }]}>
+              {dailyPlayed ? 'Tap to view your result and the leaderboard' : 'Compete on the global leaderboard'}
+            </Text>
+          </View>
+          <Text style={{ fontSize: 32 }}>{dailyPlayed ? '🏅' : '🏆'}</Text>
+        </TouchableOpacity>
+      );
+    }
+
+    if (item.kind === 'tabs') {
+      return (
+        <View style={styles.diffRow}>
+          {(Object.values(Difficulty) as Difficulty[]).map(d => {
+            const active = selectedDifficulty === d;
+            const color = DIFFICULTY_COLORS[d];
+            return (
+              <TouchableOpacity
+                key={d}
+                onPress={() => setSelectedDifficulty(d)}
+                style={[styles.diffBtn, { backgroundColor: active ? color + '22' : t.surface, borderColor: active ? color : t.borderSubtle }]}
+                accessibilityLabel={DIFFICULTY_LABELS[d]}
+                accessibilityRole="tab"
+              >
+                <Text style={[styles.diffText, { color: active ? color : t.textMuted }]}>{DIFFICULTY_LABELS[d]}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      );
+    }
+
+    if (item.kind === 'offline-end') {
+      return (
+        <View style={{ marginTop: 16, borderRadius: 12, padding: 14, backgroundColor: isDark ? 'rgba(234,179,8,0.1)' : '#fefce8', borderWidth: 1, borderColor: '#ca8a04' }}>
+          <Text style={{ color: '#ca8a04', fontFamily: 'SpaceGrotesk-Medium', fontSize: 13, textAlign: 'center' }}>
+            You've reached the end of your downloaded puzzles.{' '}Connect to the internet to download more.
+          </Text>
+        </View>
+      );
+    }
+
+    if (item.kind === 'error') {
+      return (
+        <View style={[styles.errorBanner, { backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2', borderColor: '#f87171' }]}>
+          <Text style={{ color: '#ef4444', fontFamily: 'SpaceGrotesk-Medium', fontSize: 13, textAlign: 'center' }}>
+            Unable to load puzzles. Check your internet connection.
+          </Text>
+        </View>
+      );
+    }
+
+    if (item.kind === 'empty') {
+      return (
+        <View style={{ alignItems: 'center', paddingVertical: 48 }}>
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13, textAlign: 'center' }}>
+            No puzzles available.{'\n'}Check your internet connection.
+          </Text>
+        </View>
+      );
+    }
+
+    // puzzle row
+    const { puzzle, index } = item;
+    const completed = isCompleted(puzzle.id);
+    const inProgress = !completed && isInProgress(puzzle.id);
+    return (
+      <TouchableOpacity
+        onPress={() => router.push(`/game/${gameType}/${puzzle.id}` as never)}
+        style={[styles.puzzleRow, { backgroundColor: t.surface, borderColor: completed ? '#16a34a44' : inProgress ? t.accent + '44' : t.borderSubtle }]}
+        accessibilityLabel={`Puzzle ${index + 1}${completed ? ', completed' : inProgress ? ', in progress' : ''}`}
+        accessibilityRole="button"
+      >
+        <Text style={[styles.puzzleLabel, { color: t.textPrimary }]}>Puzzle {index + 1}</Text>
+        <View style={styles.puzzleRight}>
+          {completed && <View style={styles.completedBadge}><Text style={styles.completedText}>✓ Done</Text></View>}
+          {inProgress && <View style={[styles.inProgressBadge, { borderColor: t.accent }]}><Text style={[styles.inProgressText, { color: t.accent }]}>In progress</Text></View>}
+          {!completed && !inProgress && <Text style={[styles.playArrow, { color: t.textMuted }]}>Play →</Text>}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.background }]} edges={['top']}>
       <View style={styles.header}>
@@ -161,94 +286,25 @@ export default function GameLobbyScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        onScroll={({ nativeEvent }) => {
-          const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
-          const nearBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 80;
-          if (nearBottom && hasNextPage && !isFetchingNextPage) fetchNextPage();
-        }}
-        scrollEventThrottle={400}
-      >
-        {/* Daily card */}
-        {daily != null && (
-          <TouchableOpacity
-            onPress={() => dailyPlayed ? setShowDailyResult(true) : router.push(`/game/${gameType}/daily` as never)}
-            style={[styles.dailyCard, { backgroundColor: t.surface, borderColor: dailyPlayed ? '#16a34a55' : t.accent + '55' }]}
-            accessibilityLabel={dailyPlayed ? 'View your daily result' : "Play today's daily puzzle"}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.dailyTitle, { color: dailyPlayed ? '#4ade80' : t.accent }]}>
-                {dailyPlayed ? '✓ Daily completed' : "Today's Daily"}
-              </Text>
-              <Text style={[styles.dailyDesc, { color: t.textSecondary }]}>
-                {dailyPlayed ? 'Tap to view your result and the leaderboard' : 'Compete on the global leaderboard'}
-              </Text>
-            </View>
-            <Text style={{ fontSize: 32 }}>{dailyPlayed ? '🏅' : '🏆'}</Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Difficulty tabs */}
-        <View style={styles.diffRow}>
-          {(Object.values(Difficulty) as Difficulty[]).map(d => {
-            const active = selectedDifficulty === d;
-            const color = DIFFICULTY_COLORS[d];
-            return (
-              <TouchableOpacity key={d} onPress={() => setSelectedDifficulty(d)}
-                style={[styles.diffBtn, { backgroundColor: active ? color + '22' : t.surface, borderColor: active ? color : t.borderSubtle }]}
-                accessibilityLabel={DIFFICULTY_LABELS[d]} accessibilityRole="tab"
-              >
-                <Text style={[styles.diffText, { color: active ? color : t.textMuted }]}>{DIFFICULTY_LABELS[d]}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {isError && (
-          <View style={[styles.errorBanner, { backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2', borderColor: '#f87171' }]}>
-            <Text style={{ color: '#ef4444', fontFamily: 'SpaceGrotesk-Medium', fontSize: 13, textAlign: 'center' }}>
-              Unable to load puzzles. Check your internet connection.
-            </Text>
-          </View>
-        )}
-
-        {isLoading && <ActivityIndicator color={t.accent} style={{ marginTop: 32 }} />}
-
-        {!isLoading && (
-          <View style={{ gap: 8 }}>
-            {puzzles.map((puzzle, i) => {
-              const completed = isCompleted(puzzle.id);
-              const inProgress = !completed && isInProgress(puzzle.id);
-              return (
-                <TouchableOpacity key={puzzle.id}
-                  onPress={() => router.push(`/game/${gameType}/${puzzle.id}` as never)}
-                  style={[styles.puzzleRow, { backgroundColor: t.surface, borderColor: completed ? '#16a34a44' : inProgress ? t.accent + '44' : t.borderSubtle }]}
-                  accessibilityLabel={`Puzzle ${i + 1}${completed ? ', completed' : inProgress ? ', in progress' : ''}`}
-                  accessibilityRole="button"
-                >
-                  <Text style={[styles.puzzleLabel, { color: t.textPrimary }]}>Puzzle {i + 1}</Text>
-                  <View style={styles.puzzleRight}>
-                    {completed && <View style={styles.completedBadge}><Text style={styles.completedText}>✓ Done</Text></View>}
-                    {inProgress && <View style={[styles.inProgressBadge, { borderColor: t.accent }]}><Text style={[styles.inProgressText, { color: t.accent }]}>In progress</Text></View>}
-                    {!completed && !inProgress && <Text style={[styles.playArrow, { color: t.textMuted }]}>Play →</Text>}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-            {isFetchingNextPage && <ActivityIndicator color={t.accent} style={{ marginTop: 12 }} />}
-            {!isError && puzzles.length === 0 && (
-              <View style={{ alignItems: 'center', paddingVertical: 48 }}>
-                <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13, textAlign: 'center' }}>
-                  No puzzles available.{'\n'}Check your internet connection.
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-      </ScrollView>
+      {isLoading ? (
+        <ActivityIndicator color={t.accent} style={{ marginTop: 32 }} />
+      ) : (
+        <FlatList
+          data={listItems}
+          keyExtractor={(item, i) => {
+            if (item.kind === 'puzzle') return item.puzzle.id;
+            return `${item.kind}-${i}`;
+          }}
+          renderItem={renderItem}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          // Reliable infinite scroll — triggers when 20% from bottom
+          onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
+          onEndReachedThreshold={0.2}
+          ListFooterComponent={isFetchingNextPage ? <ActivityIndicator color={t.accent} style={{ marginTop: 12 }} /> : null}
+          ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+        />
+      )}
 
       <DailyResultModal
         visible={showDailyResult}
@@ -269,13 +325,13 @@ const styles = StyleSheet.create({
   infoBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: '#374151', alignItems: 'center', justifyContent: 'center' },
   infoText: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 15 },
   content: { paddingHorizontal: 16, paddingBottom: 96 },
-  dailyCard: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, borderWidth: 1.5, marginBottom: 20 },
+  dailyCard: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 16, borderWidth: 1.5, marginBottom: 0 },
   dailyTitle: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 16, marginBottom: 2 },
   dailyDesc: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 12 },
-  diffRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  diffRow: { flexDirection: 'row', gap: 8 },
   diffBtn: { flex: 1, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, alignItems: 'center' },
   diffText: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 11 },
-  errorBanner: { borderRadius: 10, borderWidth: 1, padding: 14, marginBottom: 16 },
+  errorBanner: { borderRadius: 10, borderWidth: 1, padding: 14 },
   puzzleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderRadius: 12, borderWidth: 1 },
   puzzleLabel: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 14 },
   puzzleRight: { flexDirection: 'row', alignItems: 'center' },

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
 import { TangoEngine } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
@@ -10,6 +10,7 @@ import { usePuzzleProgressStore, SavedPuzzleProgress } from '../../stores/puzzle
 import { useOfflineQueueStore } from '../../stores/offline-queue.store';
 import { useAppTheme } from '../../hooks/useAppTheme';
 import { apiClient } from '../../lib/api-client';
+import { queryKeys } from '../../lib/query-client';
 import { puzzleCache } from '../../services/puzzle-cache.service';
 import { generateShareableResult } from '../../lib/shareable-result';
 import { playSound } from '../../services/sound.service';
@@ -19,17 +20,19 @@ import ConfirmModal from '../ui/ConfirmModal';
 
 type TangoSymbol = TangoEngine.TangoSymbol;
 interface TangoState { board: TangoSymbol[][] }
-interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null }
+interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void; puzzleNumber?: number; difficulty?: string }
 
-export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId }: Props) {
+export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
   const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
+  const queryClient = useQueryClient();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
   const [isSolved, setIsSolved] = useState(false);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -59,6 +62,21 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
     try { const r = await apiClient.get<{ id: string; solution: TangoEngine.TangoSolution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; }
   }, [puzzleId, solution]);
 
+
+  // Save progress on unmount (covers back-navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      usePuzzleProgressStore.getState().saveProgress({
+        puzzleId, gameType: GameType.TANGO, difficulty: s.difficulty, isDaily, dailyPuzzleId,
+        elapsedSeconds: useGameSessionStore.getState().getElapsed(),
+        hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining,
+        currentState: s.currentState, savedAt: Date.now(),
+      });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;
     const iv = setInterval(() => { const s = useGameSessionStore.getState().session; if (!s || s.isSolved) return; saveProgress({ puzzleId, gameType: GameType.TANGO, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: s.elapsedSeconds, hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() }); }, 10000);
@@ -75,10 +93,10 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
     const sol = await loadSolution(); if (!sol) return;
     if (TangoEngine.isTangoSolved(nb, size, sol)) {
       markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-      const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
+      const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.TANGO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-      await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.TANGO); await showInterstitialIfDue();
+      await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.TANGO); await showInterstitialIfDue();
     }
   }
 
@@ -97,7 +115,10 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
     const hint = TangoEngine.getHint(gameState, sol, given); if (!hint) return;
-    lightImpact(); playSound('hint'); updateState(hint.revealedState as TangoState);
+    lightImpact(); playSound('hint');
+    const hintedBoard = (hint.revealedState as TangoState).board;
+    updateState({ board: hintedBoard });
+    await checkAndFinish(hintedBoard);
   }, [gameState, isPaused, useHint, showRewardedAd, loadSolution, given, lightImpact, updateState]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
@@ -114,7 +135,7 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.TANGO} gameName="Tango" accentColor="#f97316" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} scrollable>
+      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.TANGO} gameName="Tango" accentColor="#f97316" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle} scrollable>
         {/* Extra top padding to push board away from header */}
         <View style={{ paddingTop: 16, alignItems: 'center' }}>
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 12, marginBottom: 14 }}>

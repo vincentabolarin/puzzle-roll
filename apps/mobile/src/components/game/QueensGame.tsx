@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
 import { TouchableOpacity } from 'react-native';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -10,6 +10,7 @@ import { usePuzzleProgressStore, SavedPuzzleProgress } from '../../stores/puzzle
 import { useOfflineQueueStore } from '../../stores/offline-queue.store';
 import { useAppTheme } from '../../hooks/useAppTheme';
 import { apiClient } from '../../lib/api-client';
+import { queryKeys } from '../../lib/query-client';
 import { puzzleCache } from '../../services/puzzle-cache.service';
 import { generateShareableResult } from '../../lib/shareable-result';
 import { playSound } from '../../services/sound.service';
@@ -26,24 +27,25 @@ const REGION_COLORS = [
 interface QueensPuzzleData { size: number; regions: number[][] }
 type Mark = 'empty' | 'x' | 'queen';
 interface QueensState { board: Mark[][] }
-interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void }
+interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void; puzzleNumber?: number; difficulty?: string }
 
-export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle }: Props) {
-  const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
+export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
+  const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
+  const queryClient = useQueryClient();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
+  const isDark = t.background !== '#f9fafb';
   const [isSolved, setIsSolved] = useState(false);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [solution, setSolution] = useState<{ queenPositions: { row: number; col: number }[] } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  // Local render trigger for drag — PanResponder updates ref but React won't re-render;
-  // we manually force a re-render by incrementing this counter
   const [dragTick, setDragTick] = useState(0);
 
   if (!puzzleData) return null;
@@ -51,7 +53,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const { size, regions } = pd;
   const CELL = Math.min(Math.floor((width * 0.92) / size), 52);
 
-  // Refs for PanResponder — zero stale closures
+  // Refs for PanResponder
   const boardRef = useRef<View>(null);
   const boardOriginRef = useRef({ x: 0, y: 0 });
   const gameStateRef = useRef<QueensState | null>(null);
@@ -62,12 +64,8 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const regionsRef = useRef(regions);
   const dragBoardRef = useRef<Mark[][] | null>(null);
   const draggedCellsRef = useRef<Set<string>>(new Set());
-  const lastDragRenderRef = useRef(0);
 
-  useEffect(() => {
-    const gs = session?.currentState as QueensState | undefined;
-    gameStateRef.current = gs ?? null;
-  }, [session?.currentState]);
+  useEffect(() => { const gs = session?.currentState as QueensState | undefined; gameStateRef.current = gs ?? null; }, [session?.currentState]);
   useEffect(() => { isPausedRef.current = session?.isPaused ?? false; }, [session?.isPaused]);
   useEffect(() => { isSolvedRef.current = isSolved; }, [isSolved]);
   useEffect(() => { cellSizeRef.current = CELL; }, [CELL]);
@@ -82,6 +80,16 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     init();
   }, [puzzleId]);
 
+  // Save on unmount (back navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      saveProgress({ puzzleId, gameType: GameType.QUEENS, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: useGameSessionStore.getState().getElapsed(), hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
+
   function startFresh() { startSession({ puzzleId, gameType: GameType.QUEENS, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: buildInitial(), initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 }); setInitialized(true); }
   function continueFromSave() { startSession({ puzzleId, gameType: GameType.QUEENS, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: (savedData?.currentState ?? buildInitial()) as QueensState, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 }); setInitialized(true); }
   const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: typeof solution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
@@ -93,11 +101,23 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   }, [initialized, session?.isSolved]);
 
   const gameState = session?.currentState as QueensState | undefined;
-  // During drag, use dragBoardRef for display (avoids waiting for store update to propagate)
   const displayBoard = dragBoardRef.current ?? gameState?.board;
   const isPaused = session?.isPaused ?? false;
 
-  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.QUEENS, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onError: (_, v) => enqueue({ puzzleId, gameType: GameType.QUEENS, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
+  const { mutate: submit } = useMutation({
+    mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) =>
+      apiClient.post('/progress/complete', { puzzleId, gameType: GameType.QUEENS, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }),
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.QUEENS) });
+      try {
+        const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats');
+        const s = stats.find(x => x.gameType === GameType.QUEENS);
+        if (s) setStreak(s.currentStreak);
+      } catch {}
+    },
+    onError: (_, v) => enqueue({ puzzleId, gameType: GameType.QUEENS, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }),
+  });
 
   function checkSolved(b: Mark[][]): boolean {
     const queens: [number, number][] = [];
@@ -118,10 +138,10 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     updateState({ board: nb });
     if (checkSolved(nb)) {
       markSolved(); setIsSolved(true); successNotification(); playSound('complete');
-      const elapsed = session?.elapsedSeconds ?? 0, hints = session?.hintsUsed ?? 0;
+      const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.QUEENS, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-      await markCompleted(puzzleId); await puzzleCache.markCompleted(puzzleId, GameType.QUEENS); await showInterstitialIfDue();
+      await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.QUEENS); await showInterstitialIfDue();
     }
   }
 
@@ -134,7 +154,13 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     await afterMove(nb);
   }, [gameState, isPaused, isSolved, lightImpact]);
 
-  // PanResponder: all state via refs; force re-render via setDragTick for immediate visual feedback
+  const handleUndo = useCallback(() => {
+    if (isSolved || isPaused) return;
+    undo();
+    dragBoardRef.current = null;
+  }, [isSolved, isPaused, undo]);
+
+  // PanResponder: no throttle on setDragTick — every cell gets immediate visual feedback
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, g) => {
@@ -162,13 +188,8 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       draggedCellsRef.current.add(key);
       if (dragBoardRef.current[r][c] === 'empty') {
         dragBoardRef.current[r][c] = 'x';
-        // Force React to re-render with the updated dragBoardRef
-        // We throttle to avoid excessive renders (max 60fps)
-        const now = Date.now();
-        if (now - lastDragRenderRef.current > 16) {
-          lastDragRenderRef.current = now;
-          setDragTick(n => n + 1);
-        }
+        // No throttle — update on every new cell for immediate visual response
+        setDragTick(n => n + 1);
       }
     },
     onPanResponderRelease: () => {
@@ -176,7 +197,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
         const finalBoard = dragBoardRef.current.map(row => [...row]) as Mark[][];
         dragBoardRef.current = null;
         draggedCellsRef.current = new Set();
-        setDragTick(n => n + 1); // flush final state
+        setDragTick(n => n + 1);
         useGameSessionStore.getState().updateState({ board: finalBoard }, true);
       }
     },
@@ -190,7 +211,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     for (const { row, col } of sol.queenPositions) {
       if (gameState.board[row][col] !== 'queen') {
         const nb = gameState.board.map(r => [...r]) as Mark[][]; nb[row][col] = 'queen';
-        lightImpact(); playSound('hint'); updateState({ board: nb }); return;
+        lightImpact(); playSound('hint'); await afterMove(nb); return;
       }
     }
   }, [gameState, isPaused, loadSolution, useHint, showRewardedAd, lightImpact, updateState]);
@@ -202,7 +223,18 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.QUEENS} gameName="Queens" accentColor="#ec4899" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} onNextPuzzle={onNextPuzzle}>
+      <GenericGameScreen
+        puzzleId={puzzleId} gameType={GameType.QUEENS} gameName="Queens" accentColor="#ec4899"
+        isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed}
+        hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily}
+        shareableResult={shareable}
+        onPauseToggle={isPaused ? resumeTimer : pauseTimer}
+        onReset={() => setShowResetConfirm(true)}
+        onGetHint={handleHint}
+        streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle}
+        showUndo
+        onUndo={handleUndo}
+      >
         <View style={{ alignItems: 'center' }}>
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 10, textAlign: 'center' }}>
             Tap: × then 👑 · Drag to mark ×
@@ -216,12 +248,25 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
                 <View key={r} style={{ flexDirection: 'row' }}>
                   {row.map((cell, c) => {
                     const regionColor = REGION_COLORS[regions[r][c] % REGION_COLORS.length];
+                    // Compute thick borders between region boundaries
+                    const borderTop    = r === 0 || regions[r][c] !== regions[r - 1][c] ? 2.5 : 0.5;
+                    const borderBottom = r === size - 1 || regions[r][c] !== regions[r + 1][c] ? 2.5 : 0.5;
+                    const borderLeft   = c === 0 || regions[r][c] !== regions[r][c - 1] ? 2.5 : 0.5;
+                    const borderRight  = c === size - 1 || regions[r][c] !== regions[r][c + 1] ? 2.5 : 0.5;
+                    const borderColor = isDark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.35)';
                     return (
                       <TouchableOpacity
                         key={c}
                         onPress={() => handleCellTap(r, c)}
                         disabled={isPaused}
-                        style={[styles.cell, { width: CELL, height: CELL, backgroundColor: regionColor }]}
+                        style={{
+                          width: CELL, height: CELL,
+                          backgroundColor: regionColor,
+                          alignItems: 'center', justifyContent: 'center',
+                          borderTopWidth: borderTop, borderBottomWidth: borderBottom,
+                          borderLeftWidth: borderLeft, borderRightWidth: borderRight,
+                          borderColor,
+                        }}
                         activeOpacity={0.75}
                       >
                         {cell === 'queen' && <Text style={{ fontSize: CELL * 0.52 }}>👑</Text>}
