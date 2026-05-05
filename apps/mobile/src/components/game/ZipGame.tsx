@@ -112,7 +112,7 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, 
   const isPaused = session?.isPaused ?? false;
   const pathSet = new Set(path.map(p => `${p.row},${p.col}`));
 
-  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.ZIP, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onError: (_, v) => enqueue({ puzzleId, gameType: GameType.ZIP, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
+  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.ZIP, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onSuccess: async () => { queryClient.invalidateQueries({ queryKey: queryKeys.user.stats }); queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.ZIP) }); try { const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats'); const s = stats.find(x => x.gameType === GameType.ZIP); if (s) setStreak(s.currentStreak); } catch {} }, onError: (_, v) => enqueue({ puzzleId, gameType: GameType.ZIP, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
 
   function isAdjacent(a: PathPt, b: PathPt) { return Math.abs(a.row - b.row) + Math.abs(a.col - b.col) === 1; }
 

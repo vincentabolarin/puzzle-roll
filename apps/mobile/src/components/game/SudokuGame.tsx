@@ -195,7 +195,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       apiClient.post('/progress/complete', { puzzleId, gameType: GameType.SUDOKU, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }),
     onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(session?.gameType ?? '') });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.SUDOKU) });
       try {
         const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats');
         const s = stats.find(x => x.gameType === GameType.SUDOKU);

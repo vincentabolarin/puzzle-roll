@@ -31,6 +31,7 @@ interface Props {
   puzzleNumber?: number;
   difficulty?: Difficulty;
 }
+
 export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
   const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, mediumImpact, successNotification } = useHaptics();
@@ -93,9 +94,10 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const board = gameState?.board;
   const isPaused = session?.isPaused ?? false;
 
-  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.HITORI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onSuccess: () => {
+  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.HITORI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(session?.gameType ?? '') });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.HITORI) });
+      try { const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats'); const s = stats.find(x => x.gameType === GameType.HITORI); if (s) setStreak(s.currentStreak); } catch {}
     },
     onError: (_, v) => enqueue({ puzzleId, gameType: GameType.HITORI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
 

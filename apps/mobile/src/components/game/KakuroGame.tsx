@@ -93,9 +93,10 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const { mutate: submit } = useMutation({
     mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) =>
       apiClient.post('/progress/complete', { puzzleId, gameType: GameType.KAKURO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }),
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(session?.gameType ?? '') });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.KAKURO) });
+      try { const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats'); const s = stats.find(x => x.gameType === GameType.KAKURO); if (s) setStreak(s.currentStreak); } catch {}
     },
     onError: (_, v) => enqueue({ puzzleId, gameType: GameType.KAKURO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }),
   });
