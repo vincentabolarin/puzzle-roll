@@ -31,7 +31,8 @@
         "backgroundColor": "#060818"
       },
       "package": "com.puzzleroll.puzzleroll",
-      "versionCode": 1
+      "versionCode": 1,
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "bundler": "metro",

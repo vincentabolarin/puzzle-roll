@@ -60,6 +60,7 @@ model UserSettings {
   notificationEnabled    Boolean @default(false)
   notificationHour       Int     @default(8)
   timezoneOffsetMinutes  Int     @default(0)
+  timezone               String  @default("UTC")
   soundEnabled           Boolean @default(true)
   hapticsEnabled         Boolean @default(true)
   autoRemoveNotes        Boolean @default(true)
