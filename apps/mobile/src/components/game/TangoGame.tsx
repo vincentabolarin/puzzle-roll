@@ -87,7 +87,7 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
   const board = gameState?.board;
   const isPaused = session?.isPaused ?? false;
 
-  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.TANGO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onError: (_, v) => enqueue({ puzzleId, gameType: GameType.TANGO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
+  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.TANGO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onSuccess: async () => { queryClient.invalidateQueries({ queryKey: queryKeys.user.stats }); queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.TANGO) }); try { const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats'); const s = stats.find(x => x.gameType === GameType.TANGO); if (s) setStreak(s.currentStreak); } catch {} }, onError: (_, v) => enqueue({ puzzleId, gameType: GameType.TANGO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
 
   async function checkAndFinish(nb: TangoSymbol[][]) {
     const sol = await loadSolution(); if (!sol) return;

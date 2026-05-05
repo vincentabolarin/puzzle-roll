@@ -1,8 +1,9 @@
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useFocusEffect } from 'expo-router';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { apiClient } from '../../src/lib/api-client';
 import { queryKeys } from '../../src/lib/query-client';
@@ -40,6 +41,12 @@ export default function ProfileScreen() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   useEffect(() => { setShowLogoutConfirm(false); }, [user?.id]);
 
+  // Refetch stats every time the profile tab gains focus — React Native does not support
+  // refetchOnWindowFocus, so useFocusEffect is the correct equivalent.
+  useFocusEffect(useCallback(() => {
+    if (user) refetchStats();
+  }, [user?.id]));
+
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeEmail, setUpgradeEmail] = useState('');
   const [upgradePassword, setUpgradePassword] = useState('');
@@ -61,10 +68,6 @@ export default function ProfileScreen() {
     queryKey: queryKeys.user.stats,
     queryFn: () => apiClient.get<StatRow[]>('/users/me/stats'),
     enabled: !!user,
-    // Refetch stats whenever the screen re-mounts (e.g. after completing a daily puzzle)
-    refetchOnMount: true,
-    // refetchOnWindowFocus: true,
-    // staleTime: 0
   });
 
   const handleLogout = async () => {

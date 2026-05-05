@@ -93,9 +93,10 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
   const board = gameState?.board;
   const isPaused = session?.isPaused ?? false;
 
-  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.NONOGRAM, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onSuccess: () => {
+  const { mutate: submit } = useMutation({ mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) => apiClient.post('/progress/complete', { puzzleId, gameType: GameType.NONOGRAM, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }), onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(session?.gameType ?? '') });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.NONOGRAM) });
+      try { const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats'); const s = stats.find(x => x.gameType === GameType.NONOGRAM); if (s) setStreak(s.currentStreak); } catch {}
     },
     onError: (_, v) => enqueue({ puzzleId, gameType: GameType.NONOGRAM, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }) });
 
