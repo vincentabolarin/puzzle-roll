@@ -1,14 +1,40 @@
-import { View, Text, ScrollView, Switch, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, Switch, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import * as Notifications from 'expo-notifications';
 import { useSettingsStore, ThemeOption } from '../../src/stores/settings.store';
+import { useAuthStore } from '../../src/stores/auth.store';
 import { useTheme } from '../_layout';
 import { themes } from '../../src/lib/theme';
+import { apiClient } from '../../src/lib/api-client';
+import { queryKeys } from '../../src/lib/query-client';
+import { usePushNotifications } from '../../src/hooks/usePushNotifications';
 
 const THEME_OPTIONS: { value: ThemeOption; label: string; icon: string }[] = [
   { value: 'light',  label: 'Light',  icon: '☀️' },
   { value: 'dark',   label: 'Dark',   icon: '🌙' },
   { value: 'system', label: 'System', icon: '📱' },
 ];
+
+const HOURS = Array.from({ length: 24 }, (_, i) => i);
+function formatHour(h: number): string {
+  if (h === 0) return '12:00 AM';
+  if (h < 12) return `${h}:00 AM`;
+  if (h === 12) return '12:00 PM';
+  return `${h - 12}:00 PM`;
+}
+
+interface UserSettingsResponse {
+  settings: {
+    notificationEnabled: boolean;
+    notificationHour: number;
+    soundEnabled: boolean;
+    hapticsEnabled: boolean;
+    autoRemoveNotes: boolean;
+    timezone: string;
+  } | null;
+}
 
 export default function SettingsScreen() {
   const {
@@ -17,15 +43,78 @@ export default function SettingsScreen() {
     autoRemoveNotes, setAutoRemoveNotes,
     theme, setTheme,
   } = useSettingsStore();
-
+  const { user } = useAuthStore();
+  const { registerForPushNotifications } = usePushNotifications();
   const resolvedTheme = useTheme();
   const t = themes[resolvedTheme];
+  const queryClient = useQueryClient();
 
-  function SettingRow({ label, description, value, onChange }: {
-    label: string; description?: string; value: boolean; onChange: (v: boolean) => void;
+  // ─── Server-side notification settings ──────────────────────────────────────
+  const [notifEnabled, setNotifEnabled] = useState(false);
+  const [notifHour, setNotifHour] = useState(8);
+  const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
+
+  // Read current server settings
+  const { data: meData, isLoading: meLoading } = useQuery({
+    queryKey: queryKeys.user.me,
+    queryFn: () => apiClient.get<UserSettingsResponse>('/users/me'),
+    enabled: !!user && !user.isAnonymous,
+  });
+
+  // Sync local state from server on load
+  useEffect(() => {
+    if (meData?.settings) {
+      setNotifEnabled(meData.settings.notificationEnabled);
+      setNotifHour(meData.settings.notificationHour ?? 8);
+    }
+  }, [meData]);
+
+  // Check device permission status
+  useEffect(() => {
+    Notifications.getPermissionsAsync().then(({ status }) => {
+      setPermissionStatus(status);
+    });
+  }, []);
+
+  const { mutate: saveNotifSettings, isPending: savingNotif } = useMutation({
+    mutationFn: (payload: { notificationEnabled: boolean; notificationHour: number }) =>
+      apiClient.patch('/users/me/notifications', {
+        ...payload,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timezoneOffsetMinutes: -(new Date().getTimezoneOffset()),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.me });
+    },
+  });
+
+  const handleToggleNotifications = async (value: boolean) => {
+    setNotifEnabled(value);
+    if (value && permissionStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      setPermissionStatus(status);
+      if (status !== 'granted') {
+        setNotifEnabled(false);
+        return;
+      }
+      // Register token now that permission is granted
+      await registerForPushNotifications();
+    }
+    saveNotifSettings({ notificationEnabled: value, notificationHour: notifHour });
+  };
+
+  const handleHourChange = (hour: number) => {
+    setNotifHour(hour);
+    saveNotifSettings({ notificationEnabled: notifEnabled, notificationHour: hour });
+  };
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+  function SettingRow({ label, description, value, onChange, disabled }: {
+    label: string; description?: string; value: boolean;
+    onChange: (v: boolean) => void; disabled?: boolean;
   }) {
     return (
-      <View style={styles.row}>
+      <View style={[styles.row, disabled && { opacity: 0.45 }]}>
         <View style={{ flex: 1, marginRight: 12 }}>
           <Text style={[styles.rowLabel, { color: t.textPrimary }]}>{label}</Text>
           {description ? <Text style={[styles.rowDesc, { color: t.textMuted }]}>{description}</Text> : null}
@@ -33,6 +122,7 @@ export default function SettingsScreen() {
         <Switch
           value={value}
           onValueChange={onChange}
+          disabled={disabled}
           trackColor={{ false: t.surface3, true: t.accent }}
           thumbColor="#ffffff"
         />
@@ -40,12 +130,15 @@ export default function SettingsScreen() {
     );
   }
 
+  const isLoggedIn = !!user && !user.isAnonymous;
+  const isDark = resolvedTheme === 'dark';
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.background }]} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={[styles.heading, { color: t.textPrimary }]}>Settings</Text>
 
-        {/* Theme */}
+        {/* ── Appearance ─────────────────────────────────────────────────── */}
         <Text style={[styles.sectionLabel, { color: t.textMuted }]}>Appearance</Text>
         <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.borderSubtle }]}>
           <Text style={[styles.themeTitle, { color: t.textPrimary }]}>Theme</Text>
@@ -77,7 +170,7 @@ export default function SettingsScreen() {
           <View style={{ height: 14 }} />
         </View>
 
-        {/* Audio */}
+        {/* ── Audio & Feedback ────────────────────────────────────────────── */}
         <Text style={[styles.sectionLabel, { color: t.textMuted }]}>Audio & Feedback</Text>
         <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.borderSubtle }]}>
           <SettingRow
@@ -95,7 +188,7 @@ export default function SettingsScreen() {
           />
         </View>
 
-        {/* Sudoku */}
+        {/* ── Sudoku ─────────────────────────────────────────────────────── */}
         <Text style={[styles.sectionLabel, { color: t.textMuted }]}>Sudoku</Text>
         <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.borderSubtle }]}>
           <SettingRow
@@ -106,9 +199,96 @@ export default function SettingsScreen() {
           />
         </View>
 
-        <Text style={[styles.footer, { color: t.textMuted }]}>
-          More game settings coming soon.
-        </Text>
+        {/* ── Notifications ───────────────────────────────────────────────── */}
+        <Text style={[styles.sectionLabel, { color: t.textMuted }]}>Notifications</Text>
+        <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.borderSubtle }]}>
+          {!isLoggedIn ? (
+            <View style={styles.row}>
+              <Text style={[styles.rowDesc, { color: t.textMuted, flex: 1 }]}>
+                Sign in to enable daily puzzle reminders and streak alerts.
+              </Text>
+            </View>
+          ) : meLoading ? (
+            <View style={[styles.row, { justifyContent: 'center' }]}>
+              <ActivityIndicator color={t.accent} />
+            </View>
+          ) : (
+            <>
+              {/* Permission warning */}
+              {permissionStatus === 'denied' && (
+                <View style={[styles.permissionBanner, { backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2', borderBottomColor: t.borderSubtle }]}>
+                  <Text style={{ color: '#ef4444', fontFamily: 'SpaceGrotesk-Medium', fontSize: 12 }}>
+                    Notifications are blocked. Enable them in your device Settings app.
+                  </Text>
+                </View>
+              )}
+
+              {/* Enable toggle */}
+              <View style={styles.row}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text style={[styles.rowLabel, { color: t.textPrimary }]}>Daily reminders</Text>
+                  <Text style={[styles.rowDesc, { color: t.textMuted }]}>
+                    Get notified when today's puzzles are ready
+                  </Text>
+                </View>
+                <Switch
+                  value={notifEnabled}
+                  onValueChange={handleToggleNotifications}
+                  disabled={savingNotif || permissionStatus === 'denied'}
+                  trackColor={{ false: t.surface3, true: t.accent }}
+                  thumbColor="#ffffff"
+                />
+              </View>
+
+              {/* Hour picker — only shown when enabled */}
+              {notifEnabled && (
+                <>
+                  <View style={[styles.divider, { backgroundColor: t.borderSubtle }]} />
+                  <View style={[styles.row, { flexDirection: 'column', alignItems: 'flex-start' }]}>
+                    <Text style={[styles.rowLabel, { color: t.textPrimary, marginBottom: 4 }]}>
+                      Reminder time
+                    </Text>
+                    <Text style={[styles.rowDesc, { color: t.textMuted, marginBottom: 12 }]}>
+                      Notifications fire in your local timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone})
+                    </Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ gap: 8, paddingBottom: 4 }}
+                    >
+                      {HOURS.map((h) => {
+                        const active = notifHour === h;
+                        return (
+                          <TouchableOpacity
+                            key={h}
+                            onPress={() => handleHourChange(h)}
+                            style={[
+                              styles.hourChip,
+                              {
+                                backgroundColor: active ? t.accent : t.surface2,
+                                borderColor: active ? t.accent : t.borderSubtle,
+                              },
+                            ]}
+                            accessibilityLabel={`Set reminder to ${formatHour(h)}`}
+                            accessibilityRole="radio"
+                          >
+                            <Text style={[
+                              styles.hourChipText,
+                              { color: active ? '#ffffff' : t.textSecondary },
+                            ]}>
+                              {formatHour(h)}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                </>
+              )}
+            </>
+          )}
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -132,5 +312,14 @@ const styles = StyleSheet.create({
   rowLabel: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 15, marginBottom: 2 },
   rowDesc: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 12, lineHeight: 16 },
   divider: { height: 1, marginHorizontal: 16 },
-  footer: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 12, textAlign: 'center', marginTop: 8 },
+  permissionBanner: {
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  hourChip: {
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: 20, borderWidth: 1.5,
+    minWidth: 80, alignItems: 'center',
+  },
+  hourChipText: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 12 },
 });

@@ -96,6 +96,7 @@ export const UserSettingsScalarFieldEnum = {
   notificationEnabled: 'notificationEnabled',
   notificationHour: 'notificationHour',
   timezoneOffsetMinutes: 'timezoneOffsetMinutes',
+  timezone: 'timezone',
   soundEnabled: 'soundEnabled',
   hapticsEnabled: 'hapticsEnabled',
   autoRemoveNotes: 'autoRemoveNotes'

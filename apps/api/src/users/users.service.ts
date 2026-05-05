@@ -66,6 +66,7 @@ export class UsersService {
     if (dto.notificationEnabled !== undefined) settingsData['notificationEnabled'] = dto.notificationEnabled;
     if (dto.notificationHour !== undefined) settingsData['notificationHour'] = dto.notificationHour;
     if (dto.timezoneOffsetMinutes !== undefined) settingsData['timezoneOffsetMinutes'] = dto.timezoneOffsetMinutes;
+    if (dto.timezone !== undefined) settingsData['timezone'] = dto.timezone;
 
     if (Object.keys(settingsData).length > 0) {
       await this.prisma.userSettings.upsert({
