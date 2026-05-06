@@ -20,9 +20,24 @@ export class UsersService {
   }
 
   async getStats(userId: string) {
-    return this.prisma.userStats.findMany({
+    const rows = await this.prisma.userStats.findMany({
       where: { userId },
       orderBy: { gameType: 'asc' },
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+    // Zero out currentStreak for any game where the player missed yesterday's daily.
+    // The stored DB value is only updated on completion, so it can be stale.
+    // We correct it at read time — this is the authoritative value the client sees.
+    return rows.map((row) => {
+      const streakActive =
+        row.lastPlayedDate === today || row.lastPlayedDate === yesterday;
+      return {
+        ...row,
+        currentStreak: streakActive ? row.currentStreak : 0,
+      };
     });
   }
 
@@ -51,6 +66,7 @@ export class UsersService {
     if (dto.notificationEnabled !== undefined) settingsData['notificationEnabled'] = dto.notificationEnabled;
     if (dto.notificationHour !== undefined) settingsData['notificationHour'] = dto.notificationHour;
     if (dto.timezoneOffsetMinutes !== undefined) settingsData['timezoneOffsetMinutes'] = dto.timezoneOffsetMinutes;
+    if (dto.timezone !== undefined) settingsData['timezone'] = dto.timezone;
 
     if (Object.keys(settingsData).length > 0) {
       await this.prisma.userSettings.upsert({
@@ -109,11 +125,14 @@ export class UsersService {
     // Missing a day resets to 1 on next daily completion.
     if (completed && isDaily) {
       if (existing?.lastPlayedDate === yesterday) {
+        // Consecutive day — extend streak
         currentStreak += 1;
-      } else if (existing?.lastPlayedDate !== today) {
-        currentStreak = 1; // new streak starts at 1, not 0
+      } else if (existing?.lastPlayedDate === today) {
+        // Same-day duplicate completion — streak unchanged
+      } else {
+        // Missed one or more days — streak resets to 1
+        currentStreak = 1;
       }
-      // If lastPlayedDate === today, same-day completion — streak unchanged
       longestStreak = Math.max(longestStreak, currentStreak);
     }
 

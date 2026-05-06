@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "532674886715",
+    "project_id": "puzzle-roll-12e85",
+    "storage_bucket": "puzzle-roll-12e85.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:532674886715:android:7b51b9e0e7a9880c5cb01e",
+        "android_client_info": {
+          "package_name": "com.puzzleroll.puzzleroll"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBf_21cc31UbCPCqYzO5l-7xpAqTRwVgkE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
