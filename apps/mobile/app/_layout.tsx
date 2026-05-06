@@ -15,6 +15,7 @@ import { syncService } from '../src/services/sync.service';
 import { useNetworkStatus } from '../src/hooks/useNetworkStatus';
 import { authService } from '../src/services/auth.service';
 import { hydratePuzzleProgress } from '../src/stores/puzzle-progress.store';
+import { usePushNotifications } from '../src/hooks/usePushNotifications';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -34,6 +35,7 @@ function RootLayout() {
   const { hydrateFromStorage: hydrateAuth, isHydrated: authHydrated, user } = useAuthStore();
   const { hydrateFromStorage: hydrateSettings, theme } = useSettingsStore();
   const { isConnected } = useNetworkStatus();
+  const { registerForPushNotifications } = usePushNotifications();
   const systemColorScheme = useColorScheme();
 
   const [dbReady, setDbReady] = useState(false);
@@ -84,6 +86,14 @@ function RootLayout() {
 
     bootstrapAuth();
   }, [dbReady]);
+
+  // Register for push notifications whenever a real (non-anonymous) user is present.
+  // Re-runs on user change so login always syncs the current IANA timezone to the backend.
+  useEffect(() => {
+    if (authBootstrapped && user && !user.isAnonymous) {
+      registerForPushNotifications();
+    }
+  }, [authBootstrapped, user?.id]);
 
   // Step 3 — Online sync
   useEffect(() => {

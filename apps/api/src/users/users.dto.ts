@@ -35,9 +35,10 @@ export class UpdateNotificationsDto {
   @IsInt()
   timezoneOffsetMinutes?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'IANA timezone string e.g. "America/New_York"' })
   @IsOptional()
   @IsString()
+  timezone?: string;
   @MaxLength(500)
   pushToken?: string;
 

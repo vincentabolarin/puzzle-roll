@@ -42,6 +42,7 @@ export type UserSettingsMinAggregateOutputType = {
   notificationEnabled: boolean | null
   notificationHour: number | null
   timezoneOffsetMinutes: number | null
+  timezone: string | null
   soundEnabled: boolean | null
   hapticsEnabled: boolean | null
   autoRemoveNotes: boolean | null
@@ -53,6 +54,7 @@ export type UserSettingsMaxAggregateOutputType = {
   notificationEnabled: boolean | null
   notificationHour: number | null
   timezoneOffsetMinutes: number | null
+  timezone: string | null
   soundEnabled: boolean | null
   hapticsEnabled: boolean | null
   autoRemoveNotes: boolean | null
@@ -64,6 +66,7 @@ export type UserSettingsCountAggregateOutputType = {
   notificationEnabled: number
   notificationHour: number
   timezoneOffsetMinutes: number
+  timezone: number
   soundEnabled: number
   hapticsEnabled: number
   autoRemoveNotes: number
@@ -87,6 +90,7 @@ export type UserSettingsMinAggregateInputType = {
   notificationEnabled?: true
   notificationHour?: true
   timezoneOffsetMinutes?: true
+  timezone?: true
   soundEnabled?: true
   hapticsEnabled?: true
   autoRemoveNotes?: true
@@ -98,6 +102,7 @@ export type UserSettingsMaxAggregateInputType = {
   notificationEnabled?: true
   notificationHour?: true
   timezoneOffsetMinutes?: true
+  timezone?: true
   soundEnabled?: true
   hapticsEnabled?: true
   autoRemoveNotes?: true
@@ -109,6 +114,7 @@ export type UserSettingsCountAggregateInputType = {
   notificationEnabled?: true
   notificationHour?: true
   timezoneOffsetMinutes?: true
+  timezone?: true
   soundEnabled?: true
   hapticsEnabled?: true
   autoRemoveNotes?: true
@@ -207,6 +213,7 @@ export type UserSettingsGroupByOutputType = {
   notificationEnabled: boolean
   notificationHour: number
   timezoneOffsetMinutes: number
+  timezone: string
   soundEnabled: boolean
   hapticsEnabled: boolean
   autoRemoveNotes: boolean
@@ -241,6 +248,7 @@ export type UserSettingsWhereInput = {
   notificationEnabled?: Prisma.BoolFilter<"UserSettings"> | boolean
   notificationHour?: Prisma.IntFilter<"UserSettings"> | number
   timezoneOffsetMinutes?: Prisma.IntFilter<"UserSettings"> | number
+  timezone?: Prisma.StringFilter<"UserSettings"> | string
   soundEnabled?: Prisma.BoolFilter<"UserSettings"> | boolean
   hapticsEnabled?: Prisma.BoolFilter<"UserSettings"> | boolean
   autoRemoveNotes?: Prisma.BoolFilter<"UserSettings"> | boolean
@@ -253,6 +261,7 @@ export type UserSettingsOrderByWithRelationInput = {
   notificationEnabled?: Prisma.SortOrder
   notificationHour?: Prisma.SortOrder
   timezoneOffsetMinutes?: Prisma.SortOrder
+  timezone?: Prisma.SortOrder
   soundEnabled?: Prisma.SortOrder
   hapticsEnabled?: Prisma.SortOrder
   autoRemoveNotes?: Prisma.SortOrder
@@ -268,6 +277,7 @@ export type UserSettingsWhereUniqueInput = Prisma.AtLeast<{
   notificationEnabled?: Prisma.BoolFilter<"UserSettings"> | boolean
   notificationHour?: Prisma.IntFilter<"UserSettings"> | number
   timezoneOffsetMinutes?: Prisma.IntFilter<"UserSettings"> | number
+  timezone?: Prisma.StringFilter<"UserSettings"> | string
   soundEnabled?: Prisma.BoolFilter<"UserSettings"> | boolean
   hapticsEnabled?: Prisma.BoolFilter<"UserSettings"> | boolean
   autoRemoveNotes?: Prisma.BoolFilter<"UserSettings"> | boolean
@@ -280,6 +290,7 @@ export type UserSettingsOrderByWithAggregationInput = {
   notificationEnabled?: Prisma.SortOrder
   notificationHour?: Prisma.SortOrder
   timezoneOffsetMinutes?: Prisma.SortOrder
+  timezone?: Prisma.SortOrder
   soundEnabled?: Prisma.SortOrder
   hapticsEnabled?: Prisma.SortOrder
   autoRemoveNotes?: Prisma.SortOrder
@@ -299,6 +310,7 @@ export type UserSettingsScalarWhereWithAggregatesInput = {
   notificationEnabled?: Prisma.BoolWithAggregatesFilter<"UserSettings"> | boolean
   notificationHour?: Prisma.IntWithAggregatesFilter<"UserSettings"> | number
   timezoneOffsetMinutes?: Prisma.IntWithAggregatesFilter<"UserSettings"> | number
+  timezone?: Prisma.StringWithAggregatesFilter<"UserSettings"> | string
   soundEnabled?: Prisma.BoolWithAggregatesFilter<"UserSettings"> | boolean
   hapticsEnabled?: Prisma.BoolWithAggregatesFilter<"UserSettings"> | boolean
   autoRemoveNotes?: Prisma.BoolWithAggregatesFilter<"UserSettings"> | boolean
@@ -309,6 +321,7 @@ export type UserSettingsCreateInput = {
   notificationEnabled?: boolean
   notificationHour?: number
   timezoneOffsetMinutes?: number
+  timezone?: string
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
@@ -321,6 +334,7 @@ export type UserSettingsUncheckedCreateInput = {
   notificationEnabled?: boolean
   notificationHour?: number
   timezoneOffsetMinutes?: number
+  timezone?: string
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
@@ -331,6 +345,7 @@ export type UserSettingsUpdateInput = {
   notificationEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   notificationHour?: Prisma.IntFieldUpdateOperationsInput | number
   timezoneOffsetMinutes?: Prisma.IntFieldUpdateOperationsInput | number
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
   soundEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   hapticsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   autoRemoveNotes?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -343,6 +358,7 @@ export type UserSettingsUncheckedUpdateInput = {
   notificationEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   notificationHour?: Prisma.IntFieldUpdateOperationsInput | number
   timezoneOffsetMinutes?: Prisma.IntFieldUpdateOperationsInput | number
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
   soundEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   hapticsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   autoRemoveNotes?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -354,6 +370,7 @@ export type UserSettingsCreateManyInput = {
   notificationEnabled?: boolean
   notificationHour?: number
   timezoneOffsetMinutes?: number
+  timezone?: string
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
@@ -364,6 +381,7 @@ export type UserSettingsUpdateManyMutationInput = {
   notificationEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   notificationHour?: Prisma.IntFieldUpdateOperationsInput | number
   timezoneOffsetMinutes?: Prisma.IntFieldUpdateOperationsInput | number
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
   soundEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   hapticsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   autoRemoveNotes?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -375,6 +393,7 @@ export type UserSettingsUncheckedUpdateManyInput = {
   notificationEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   notificationHour?: Prisma.IntFieldUpdateOperationsInput | number
   timezoneOffsetMinutes?: Prisma.IntFieldUpdateOperationsInput | number
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
   soundEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   hapticsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   autoRemoveNotes?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -391,6 +410,7 @@ export type UserSettingsCountOrderByAggregateInput = {
   notificationEnabled?: Prisma.SortOrder
   notificationHour?: Prisma.SortOrder
   timezoneOffsetMinutes?: Prisma.SortOrder
+  timezone?: Prisma.SortOrder
   soundEnabled?: Prisma.SortOrder
   hapticsEnabled?: Prisma.SortOrder
   autoRemoveNotes?: Prisma.SortOrder
@@ -407,6 +427,7 @@ export type UserSettingsMaxOrderByAggregateInput = {
   notificationEnabled?: Prisma.SortOrder
   notificationHour?: Prisma.SortOrder
   timezoneOffsetMinutes?: Prisma.SortOrder
+  timezone?: Prisma.SortOrder
   soundEnabled?: Prisma.SortOrder
   hapticsEnabled?: Prisma.SortOrder
   autoRemoveNotes?: Prisma.SortOrder
@@ -418,6 +439,7 @@ export type UserSettingsMinOrderByAggregateInput = {
   notificationEnabled?: Prisma.SortOrder
   notificationHour?: Prisma.SortOrder
   timezoneOffsetMinutes?: Prisma.SortOrder
+  timezone?: Prisma.SortOrder
   soundEnabled?: Prisma.SortOrder
   hapticsEnabled?: Prisma.SortOrder
   autoRemoveNotes?: Prisma.SortOrder
@@ -473,6 +495,7 @@ export type UserSettingsCreateWithoutUserInput = {
   notificationEnabled?: boolean
   notificationHour?: number
   timezoneOffsetMinutes?: number
+  timezone?: string
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
@@ -483,6 +506,7 @@ export type UserSettingsUncheckedCreateWithoutUserInput = {
   notificationEnabled?: boolean
   notificationHour?: number
   timezoneOffsetMinutes?: number
+  timezone?: string
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
@@ -509,6 +533,7 @@ export type UserSettingsUpdateWithoutUserInput = {
   notificationEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   notificationHour?: Prisma.IntFieldUpdateOperationsInput | number
   timezoneOffsetMinutes?: Prisma.IntFieldUpdateOperationsInput | number
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
   soundEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   hapticsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   autoRemoveNotes?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -519,6 +544,7 @@ export type UserSettingsUncheckedUpdateWithoutUserInput = {
   notificationEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   notificationHour?: Prisma.IntFieldUpdateOperationsInput | number
   timezoneOffsetMinutes?: Prisma.IntFieldUpdateOperationsInput | number
+  timezone?: Prisma.StringFieldUpdateOperationsInput | string
   soundEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   hapticsEnabled?: Prisma.BoolFieldUpdateOperationsInput | boolean
   autoRemoveNotes?: Prisma.BoolFieldUpdateOperationsInput | boolean
@@ -532,6 +558,7 @@ export type UserSettingsSelect<ExtArgs extends runtime.Types.Extensions.Internal
   notificationEnabled?: boolean
   notificationHour?: boolean
   timezoneOffsetMinutes?: boolean
+  timezone?: boolean
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
@@ -544,6 +571,7 @@ export type UserSettingsSelectCreateManyAndReturn<ExtArgs extends runtime.Types.
   notificationEnabled?: boolean
   notificationHour?: boolean
   timezoneOffsetMinutes?: boolean
+  timezone?: boolean
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
@@ -556,6 +584,7 @@ export type UserSettingsSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.
   notificationEnabled?: boolean
   notificationHour?: boolean
   timezoneOffsetMinutes?: boolean
+  timezone?: boolean
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
@@ -568,12 +597,13 @@ export type UserSettingsSelectScalar = {
   notificationEnabled?: boolean
   notificationHour?: boolean
   timezoneOffsetMinutes?: boolean
+  timezone?: boolean
   soundEnabled?: boolean
   hapticsEnabled?: boolean
   autoRemoveNotes?: boolean
 }
 
-export type UserSettingsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "userId" | "notificationEnabled" | "notificationHour" | "timezoneOffsetMinutes" | "soundEnabled" | "hapticsEnabled" | "autoRemoveNotes", ExtArgs["result"]["userSettings"]>
+export type UserSettingsOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "userId" | "notificationEnabled" | "notificationHour" | "timezoneOffsetMinutes" | "timezone" | "soundEnabled" | "hapticsEnabled" | "autoRemoveNotes", ExtArgs["result"]["userSettings"]>
 export type UserSettingsInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   user?: boolean | Prisma.UserDefaultArgs<ExtArgs>
 }
@@ -595,6 +625,7 @@ export type $UserSettingsPayload<ExtArgs extends runtime.Types.Extensions.Intern
     notificationEnabled: boolean
     notificationHour: number
     timezoneOffsetMinutes: number
+    timezone: string
     soundEnabled: boolean
     hapticsEnabled: boolean
     autoRemoveNotes: boolean
@@ -1027,6 +1058,7 @@ export interface UserSettingsFieldRefs {
   readonly notificationEnabled: Prisma.FieldRef<"UserSettings", 'Boolean'>
   readonly notificationHour: Prisma.FieldRef<"UserSettings", 'Int'>
   readonly timezoneOffsetMinutes: Prisma.FieldRef<"UserSettings", 'Int'>
+  readonly timezone: Prisma.FieldRef<"UserSettings", 'String'>
   readonly soundEnabled: Prisma.FieldRef<"UserSettings", 'Boolean'>
   readonly hapticsEnabled: Prisma.FieldRef<"UserSettings", 'Boolean'>
   readonly autoRemoveNotes: Prisma.FieldRef<"UserSettings", 'Boolean'>

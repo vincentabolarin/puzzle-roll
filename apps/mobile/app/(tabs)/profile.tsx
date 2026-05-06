@@ -1,9 +1,8 @@
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useFocusEffect } from 'expo-router';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { apiClient } from '../../src/lib/api-client';
 import { queryKeys } from '../../src/lib/query-client';
@@ -41,12 +40,6 @@ export default function ProfileScreen() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   useEffect(() => { setShowLogoutConfirm(false); }, [user?.id]);
 
-  // Refetch stats every time the profile tab gains focus — React Native does not support
-  // refetchOnWindowFocus, so useFocusEffect is the correct equivalent.
-  useFocusEffect(useCallback(() => {
-    if (user) refetchStats();
-  }, [user?.id]));
-
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeEmail, setUpgradeEmail] = useState('');
   const [upgradePassword, setUpgradePassword] = useState('');
@@ -68,6 +61,8 @@ export default function ProfileScreen() {
     queryKey: queryKeys.user.stats,
     queryFn: () => apiClient.get<StatRow[]>('/users/me/stats'),
     enabled: !!user,
+    // Refetch stats whenever the screen re-mounts (e.g. after completing a daily puzzle)
+    refetchOnMount: true,
   });
 
   const handleLogout = async () => {
@@ -103,9 +98,18 @@ export default function ProfileScreen() {
       setEditingUsername(false);
       await refetchProfile();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not save username.';
-      // 404 means username endpoint not found — show meaningful error
-      setUsernameError(message.includes('404') ? 'Username service unavailable. Please try again later.' : message);
+      const isConflict = (err instanceof Error && (
+        err.message.toLowerCase().includes('conflict') ||
+        err.message.toLowerCase().includes('taken') ||
+        ('statusCode' in err && (err as { statusCode: number }).statusCode === 409)
+      ));
+      if (isConflict) {
+        setUsernameError('That username is already taken. Try another.');
+      } else if (err instanceof Error && err.message.includes('404')) {
+        setUsernameError('Username service unavailable. Please try again later.');
+      } else {
+        setUsernameError('Could not save username. Please try again.');
+      }
     } finally { setSavingUsername(false); }
   };
 

@@ -10,7 +10,7 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "ts-node --project tsconfig.json seed/index.ts",
-    "db:studio": "prisma studio",
+    "db:studio": "prisma studio --browser none",
     "db:reset": "prisma migrate reset --force"
   },
   "dependencies": {
