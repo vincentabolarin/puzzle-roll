@@ -1,4 +1,4 @@
-import { CellPosition, Difficulty, GeneratedPuzzle, HintResult } from '../types/core';
+import { CellPosition, Difficulty, GeneratedPuzzle, HintResult } from '../../types/core';
 
 // ─── Sudoku Types ─────────────────────────────────────────────────────────────
 

@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/queens';
+export { generateQueens } from '@puzzle-roll/shared';

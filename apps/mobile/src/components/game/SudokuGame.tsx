@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { router } from 'expo-router';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withSequence, withTiming, runOnJS } from 'react-native-reanimated';
-import { useMutation } from '@tanstack/react-query';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withSequence } from 'react-native-reanimated';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../lib/query-client';
 import { SudokuEngine, GameType, Difficulty } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -11,105 +12,98 @@ import { useBreakpoint } from '../../hooks/useBreakpoint';
 import { useGameBoardSize } from '../../hooks/useGameBoardSize';
 import { useSettingsStore } from '../../stores/settings.store';
 import { useOfflineQueueStore } from '../../stores/offline-queue.store';
+import { usePuzzleProgressStore, SavedPuzzleProgress } from '../../stores/puzzle-progress.store';
+import { useAppTheme } from '../../hooks/useAppTheme';
 import { apiClient } from '../../lib/api-client';
 import { puzzleCache } from '../../services/puzzle-cache.service';
 import { generateShareableResult } from '../../lib/shareable-result';
+import { playSound } from '../../services/sound.service';
 import GameTimer from './GameTimer';
 import HintButton from './HintButton';
 import CompletionModal from './CompletionModal';
+import PauseModal from './PauseModal';
+import ResumeModal from './ResumeModal';
+import ConfirmModal from '../ui/ConfirmModal';
 
 interface SudokuGameProps {
   puzzleId: string;
   puzzleData: unknown;
-  solution: unknown;
   isDaily: boolean;
   dailyPuzzleId: string | null;
+  puzzleNumber?: number;
+  difficulty?: string;
+  onNextPuzzle?: () => void;
 }
 
 type SudokuDigit = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
-function buildInitialBoard(puzzleGrid: SudokuEngine.SudokuGrid): SudokuEngine.SudokuBoardState {
-  return puzzleGrid.map((row, r) =>
-    row.map((val, c): SudokuEngine.SudokuCellState => ({
-      value: val,
-      isGiven: val !== 0,
-      isError: false,
-      notes: new Set(),
+interface ExtendedCellState extends SudokuEngine.SudokuCellState {
+  isWrongEntry?: boolean;
+}
+type ExtendedBoard = ExtendedCellState[][];
+
+function buildInitialBoard(puzzleGrid: SudokuEngine.SudokuGrid): ExtendedBoard {
+  return puzzleGrid.map(row =>
+    row.map((val): ExtendedCellState => ({
+      value: val, isGiven: val !== 0, isError: false, isWrongEntry: false, notes: new Set(),
     }))
   );
 }
 
-function CellView({
-  cell,
-  row,
-  col,
-  isSelected,
-  isHighlighted,
-  isConflict,
-  cellSize,
-  onPress,
-}: {
-  cell: SudokuEngine.SudokuCellState;
-  row: number;
-  col: number;
-  isSelected: boolean;
-  isHighlighted: boolean;
-  isConflict: boolean;
-  cellSize: number;
-  onPress: () => void;
-}) {
-  const isBoxBorderRight = col === 2 || col === 5;
-  const isBoxBorderBottom = row === 2 || row === 5;
+function deserialiseBoardNotes(rawBoard: ExtendedCellState[][]): ExtendedBoard {
+  return rawBoard.map(row =>
+    row.map(cell => {
+      const rawNotes = Array.isArray(cell.notes) ? cell.notes : Object.values(cell.notes ?? {});
+      return { ...cell, isWrongEntry: false, notes: new Set<SudokuDigit>(rawNotes as SudokuDigit[]) };
+    })
+  );
+}
 
-  const bgColor = isSelected
-    ? '#6366f1'
-    : isConflict
-    ? '#7f1d1d'
-    : isHighlighted
-    ? '#1f2937'
+function CellView({ cell, row, col, isSelected, isHighlighted, cellSize, onPress, isDark }: {
+  cell: ExtendedCellState; row: number; col: number;
+  isSelected: boolean; isHighlighted: boolean;
+  cellSize: number; onPress: () => void; isDark: boolean;
+}) {
+  const noteSize = Math.max(9, cellSize * 0.22);
+  const digitSize = Math.max(18, cellSize * 0.52);
+  const isBoxRight = col === 2 || col === 5;
+  const isBoxBottom = row === 2 || row === 5;
+
+  const bgColor = isSelected ? '#6366f1'
+    : cell.isWrongEntry ? (isDark ? '#7f1d1d' : '#fee2e2')
+    : isHighlighted ? (isDark ? '#1f2937' : '#e0e7ff')
     : 'transparent';
+
+  const digitColor = isSelected ? '#ffffff'
+    : cell.isWrongEntry ? '#ef4444'
+    : cell.isError ? '#ef4444'
+    : cell.isGiven ? (isDark ? '#f9fafb' : '#111827')
+    : '#6366f1';
 
   return (
     <TouchableOpacity
       onPress={onPress}
+      delayPressIn={0}
       style={{
-        width: cellSize,
-        height: cellSize,
-        backgroundColor: bgColor,
-        borderRightWidth: isBoxBorderRight ? 2 : 0.5,
-        borderBottomWidth: isBoxBorderBottom ? 2 : 0.5,
-        borderColor: '#374151',
-        alignItems: 'center',
-        justifyContent: 'center',
+        width: cellSize, height: cellSize, backgroundColor: bgColor,
+        borderRightWidth: isBoxRight ? 2 : 0.5,
+        borderBottomWidth: isBoxBottom ? 2 : 0.5,
+        borderLeftWidth: 0, borderTopWidth: 0,
+        borderColor: cell.isError && !cell.isWrongEntry ? '#ef4444' : (isDark ? '#374151' : '#9ca3af'),
+        alignItems: 'center', justifyContent: 'center',
       }}
-      accessibilityLabel={`Cell row ${row + 1} column ${col + 1}, value ${cell.value || 'empty'}`}
-      accessibilityRole="button"
+      accessibilityLabel={`Row ${row + 1} col ${col + 1}${cell.value ? `, ${cell.value}` : ''}`}
     >
       {cell.value !== 0 ? (
-        <Text
-          style={{
-            fontSize: cellSize * 0.45,
-            fontFamily: 'SpaceGrotesk-Bold',
-            color: cell.isGiven ? '#f9fafb' : isConflict ? '#fca5a5' : '#a5b4fc',
-          }}
-        >
-          {cell.value}
-        </Text>
+        <Text style={{ fontSize: digitSize, fontFamily: 'SpaceGrotesk-Bold', color: digitColor }}>{cell.value}</Text>
       ) : cell.notes.size > 0 ? (
-        <View style={{ flexWrap: 'wrap', flexDirection: 'row', width: cellSize - 2 }}>
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
-            <Text
-              key={n}
-              style={{
-                width: (cellSize - 2) / 3,
-                fontSize: cellSize * 0.12,
-                textAlign: 'center',
-                color: cell.notes.has(n as SudokuDigit) ? '#6b7280' : 'transparent',
-                fontFamily: 'SpaceGrotesk-Regular',
-              }}
-            >
-              {n}
-            </Text>
+        <View style={{ flexWrap: 'wrap', flexDirection: 'row', width: cellSize - 4 }}>
+          {([1,2,3,4,5,6,7,8,9] as SudokuDigit[]).map(n => (
+            <Text key={n} style={{
+              width: (cellSize - 4) / 3, fontSize: noteSize, textAlign: 'center',
+              color: cell.notes.has(n) ? (isSelected ? '#ffffff' : '#818cf8') : 'transparent',
+              fontFamily: 'SpaceGrotesk-Medium', lineHeight: noteSize + 4,
+            }}>{n}</Text>
           ))}
         </View>
       ) : null}
@@ -117,339 +111,347 @@ function CellView({
   );
 }
 
-export default function SudokuGame({ puzzleId, puzzleData, solution: _solution, isDaily, dailyPuzzleId }: SudokuGameProps) {
-  const { session, startSession, updateState, undo, useHint, markSolved } = useGameSessionStore();
-  const { lightImpact, heavyImpact, successNotification, errorNotification } = useHaptics();
+export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: SudokuGameProps) {
+  const { session, startSession, updateState, undo, useHint, markSolved, pauseTimer, resumeTimer } = useGameSessionStore();
+  const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const { isTablet } = useBreakpoint();
   const { boardSize, cellSize } = useGameBoardSize(9);
   const { autoRemoveNotes } = useSettingsStore();
   const { enqueue } = useOfflineQueueStore();
+  const queryClient = useQueryClient();
+  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const t = useAppTheme();
+  const isDark = t.background !== '#f9fafb';
+
+  const [solutionGrid, setSolutionGrid] = useState<SudokuEngine.SudokuGrid | null>(null);
+  const [showResumeModal, setShowResumeModal] = useState(false);
+  const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
+  const [initialized, setInitialized] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [pressedDigit, setPressedDigit] = useState<number | null>(null);
+  const [streak, setStreak] = useState<number | undefined>(undefined);
 
   const completionScale = useSharedValue(1);
-  const completionStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: completionScale.value }],
-  }));
-
-  // Fetch solution lazily (only needed for hints and on completion check)
-  const [solutionGrid, setSolutionGrid] = useState<SudokuEngine.SudokuGrid | null>(null);
+  const completionStyle = useAnimatedStyle(() => ({ transform: [{ scale: completionScale.value }] }));
 
   const loadSolution = useCallback(async () => {
     if (solutionGrid) return solutionGrid;
     try {
-      const result = await apiClient.get<{ id: string; solution: { grid: SudokuEngine.SudokuGrid } }>(
-        `/puzzles/id/${puzzleId}/solution`
-      );
-      setSolutionGrid(result.solution.grid);
-      return result.solution.grid;
-    } catch {
-      return null;
-    }
+      const r = await apiClient.get<{ id: string; solution: { grid: SudokuEngine.SudokuGrid } }>(`/puzzles/id/${puzzleId}/solution`);
+      setSolutionGrid(r.solution.grid); return r.solution.grid;
+    } catch { return null; }
   }, [puzzleId, solutionGrid]);
 
-  // Initialize session
   useEffect(() => {
-    const pd = puzzleData as SudokuEngine.SudokuPuzzleData;
-    const board = buildInitialBoard(pd.grid);
-    startSession({
-      puzzleId,
-      gameType: GameType.SUDOKU,
-      difficulty: Difficulty.MEDIUM,
-      isDaily,
-      dailyPuzzleId,
-      initialState: { board, selectedCell: null, isNotesMode: false } satisfies SudokuEngine.SudokuGameState,
-    });
+    async function init() { const saved = await loadProgress(puzzleId); if (saved) { setSavedData(saved); setShowResumeModal(true); } else startFresh(); }
+    init();
   }, [puzzleId]);
 
-  const gameState = session?.currentState as SudokuEngine.SudokuGameState | undefined;
-  const board = gameState?.board;
+  function startFresh() {
+    const pd = puzzleData as SudokuEngine.SudokuPuzzleData;
+    startSession({ puzzleId, gameType: GameType.SUDOKU, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: { board: buildInitialBoard(pd.grid), selectedCell: null, isNotesMode: false }, initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 });
+    setInitialized(true);
+  }
+
+  function continueFromSave() {
+    if (!savedData) { startFresh(); return; }
+    const rawState = savedData.currentState as { board: ExtendedCellState[][]; selectedCell: unknown; isNotesMode: boolean };
+    const deserialisedBoard = deserialiseBoardNotes(rawState.board);
+    startSession({ puzzleId, gameType: GameType.SUDOKU, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: { ...rawState, board: deserialisedBoard }, initialElapsedSeconds: savedData.elapsedSeconds, initialHintsUsed: savedData.hintsUsed, initialHintsRemaining: savedData.hintsRemaining });
+    setInitialized(true);
+  }
+
+  const doSaveProgress = useCallback(() => {
+    const s = useGameSessionStore.getState().session;
+    if (!s || s.isSolved) return;
+    saveProgress({ puzzleId, gameType: GameType.SUDOKU, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: s.elapsedSeconds, hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() });
+  }, [puzzleId, isDaily, dailyPuzzleId, saveProgress]);
+
+  useEffect(() => {
+    if (!initialized || !session || session.isSolved) return;
+    const iv = setInterval(doSaveProgress, 10000);
+    return () => clearInterval(iv);
+  }, [initialized, session?.isSolved, doSaveProgress]);
+
+
+  // Save progress on unmount (covers back-navigation)
+  useEffect(() => {
+    return () => {
+      const s = useGameSessionStore.getState().session;
+      if (!s || s.isSolved) return;
+      saveProgress({ puzzleId, gameType: GameType.SUDOKU, difficulty: s.difficulty, isDaily, dailyPuzzleId, elapsedSeconds: useGameSessionStore.getState().getElapsed(), hintsUsed: s.hintsUsed, hintsRemaining: s.hintsRemaining, currentState: s.currentState, savedAt: Date.now() });
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleId]);
+  const gameState = session?.currentState as (SudokuEngine.SudokuGameState & { board: ExtendedBoard }) | undefined;
+  const board = gameState?.board as ExtendedBoard | undefined;
   const selectedCell = gameState?.selectedCell;
   const isNotesMode = gameState?.isNotesMode ?? false;
+  const isPaused = session?.isPaused ?? false;
 
   const { mutate: submitCompletion } = useMutation({
-    mutationFn: (payload: {
-      elapsedSeconds: number;
-      hintsUsed: number;
-      shareableResult: string;
-    }) =>
-      apiClient.post('/progress/complete', {
-        puzzleId,
-        gameType: GameType.SUDOKU,
-        difficulty: session?.difficulty ?? Difficulty.MEDIUM,
-        isDaily,
-        dailyPuzzleId,
-        ...payload,
-        completedAt: new Date().toISOString(),
-      }),
-    onError: (_, variables) => {
-      // Enqueue for offline sync
-      enqueue({
-        puzzleId,
-        gameType: GameType.SUDOKU,
-        difficulty: session?.difficulty ?? Difficulty.MEDIUM,
-        isDaily,
-        dailyPuzzleId,
-        ...variables,
-        shareableResult: variables.shareableResult,
-      });
+    mutationFn: (p: { elapsedSeconds: number; hintsUsed: number; shareableResult: string }) =>
+      apiClient.post('/progress/complete', { puzzleId, gameType: GameType.SUDOKU, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...p, completedAt: new Date().toISOString() }),
+    onSuccess: async () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.user.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard.daily(GameType.SUDOKU) });
+      try {
+        const stats = await apiClient.get<Array<{ gameType: string; currentStreak: number }>>('/users/me/stats');
+        const s = stats.find(x => x.gameType === GameType.SUDOKU);
+        if (s) setStreak(s.currentStreak);
+      } catch {}
     },
+    onError: (_, v) => enqueue({ puzzleId, gameType: GameType.SUDOKU, difficulty: session?.difficulty ?? Difficulty.MEDIUM, isDaily, dailyPuzzleId, ...v, completedAt: '' }),
   });
 
+  async function triggerWin(currentBoard: ExtendedBoard, sol: SudokuEngine.SudokuGrid) {
+    if (!SudokuEngine.isBoardSolved(currentBoard, sol)) return;
+    markSolved(); successNotification(); playSound('complete');
+    completionScale.value = withSequence(withSpring(1.05), withSpring(1));
+    const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
+    const shareable = generateShareableResult({ gameType: GameType.SUDOKU, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
+    submitCompletion({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+    await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.SUDOKU); await showInterstitialIfDue();
+  }
+
   const handleCellPress = useCallback((row: number, col: number) => {
-    if (!gameState || session?.isSolved) return;
-    lightImpact();
+    if (!gameState || session?.isSolved || isPaused) return;
+    lightImpact(); playSound('cell_tap');
     updateState({ ...gameState, selectedCell: { row, col } }, false);
-  }, [gameState, session?.isSolved, lightImpact, updateState]);
+  }, [gameState, session?.isSolved, isPaused, lightImpact, updateState]);
 
   const handleDigitPress = useCallback(async (digit: SudokuDigit) => {
-    if (!gameState || !selectedCell || session?.isSolved) return;
+    if (!gameState || !selectedCell || session?.isSolved || isPaused) return;
     const { row, col } = selectedCell;
-    const cell = gameState.board[row][col];
-    if (cell.isGiven) return;
-
+    if (gameState.board[row][col].isGiven) return;
     lightImpact();
+    setPressedDigit(digit);
+    setTimeout(() => setPressedDigit(null), 120);
 
-    let newBoard = gameState.board.map((r) => r.map((c) => ({ ...c, notes: new Set(c.notes) })));
+    let newBoard: ExtendedBoard = gameState.board.map(r => r.map(c => ({ ...c, notes: new Set(c.notes) })));
 
     if (isNotesMode) {
       const notes = new Set(newBoard[row][col].notes);
-      if (notes.has(digit)) notes.delete(digit);
-      else notes.add(digit);
+      if (notes.has(digit)) notes.delete(digit); else notes.add(digit);
       newBoard[row][col] = { ...newBoard[row][col], notes };
+      playSound('digit_place');
     } else {
-      newBoard[row][col] = { ...newBoard[row][col], value: digit, notes: new Set() };
-      if (autoRemoveNotes) {
-        newBoard = SudokuEngine.applyAutoRemoveNotes(newBoard, row, col, digit);
-      }
-    }
+      // KEY FIX: Only clear error flags on the cell being edited and cells whose
+      // conflict was caused specifically by the value in this cell.
+      // We do NOT blanket-clear all error states across the board.
+      const prevValue = newBoard[row][col].value;
 
-    const conflicts = SudokuEngine.getBoardConflicts(newBoard);
-    conflicts.forEach(([r, c]) => {
-      newBoard[r][c] = { ...newBoard[r][c], isError: true };
-    });
-    // Clear previous errors
-    newBoard.forEach((r, ri) =>
-      r.forEach((cell, ci) => {
-        if (!conflicts.some(([cr, cc]) => cr === ri && cc === ci)) {
-          newBoard[ri][ci] = { ...newBoard[ri][ci], isError: false };
+      // Step 1: place the new digit in the target cell
+      newBoard[row][col] = { ...newBoard[row][col], value: digit, notes: new Set(), isError: false, isWrongEntry: false };
+
+      if (autoRemoveNotes) newBoard = SudokuEngine.applyAutoRemoveNotes(newBoard, row, col, digit) as ExtendedBoard;
+
+      // Step 2: recompute all conflicts on the entire board from scratch
+      const conflicts = SudokuEngine.getBoardConflicts(newBoard);
+      const cs = new Set(conflicts.map(([r, c]) => `${r},${c}`));
+
+      // Step 3: re-apply error/wrongEntry state based on fresh conflict set
+      // - The newly placed cell: isWrongEntry if it's still in a conflict
+      // - All other conflicting cells: isError = true (victim)
+      // - Cells NOT in conflict set: clear their error state ONLY IF their
+      //   previous error was caused by the cell we just edited (same row/col/box)
+      const sameGroup = (r: number, c: number) =>
+        r === row || c === col ||
+        (Math.floor(r / 3) === Math.floor(row / 3) && Math.floor(c / 3) === Math.floor(col / 3));
+
+      newBoard = newBoard.map((r, ri) => r.map((cell, ci) => {
+        if (ri === row && ci === col) {
+          return { ...cell, isWrongEntry: cs.has(`${ri},${ci}`), isError: false };
         }
-      })
-    );
+        if (cs.has(`${ri},${ci}`)) {
+          // Currently in conflict → mark as error victim
+          return { ...cell, isError: true, isWrongEntry: false };
+        }
+        if (cell.isError && sameGroup(ri, ci)) {
+          // Was an error victim caused by this cell's previous value → clear it
+          return { ...cell, isError: false };
+        }
+        // Leave all other cells' error state unchanged
+        return cell;
+      }));
 
-    const newState: SudokuEngine.SudokuGameState = { ...gameState, board: newBoard };
-    updateState(newState);
-
-    // Check solved
-    const sol = await loadSolution();
-    if (sol && SudokuEngine.isBoardSolved(newBoard, sol)) {
-      markSolved();
-      successNotification();
-      completionScale.value = withSequence(
-        withSpring(1.05),
-        withSpring(1)
-      );
-
-      const elapsed = session?.elapsedSeconds ?? 0;
-      const hints = session?.hintsUsed ?? 0;
-      const shareable = generateShareableResult({
-        gameType: GameType.SUDOKU,
-        difficulty: session?.difficulty ?? Difficulty.MEDIUM,
-        elapsedSeconds: elapsed,
-        hintsUsed: hints,
-        date: new Date().toISOString().slice(0, 10),
-        isDaily,
-      });
-
-      submitCompletion({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
-      await puzzleCache.markCompleted(puzzleId, GameType.SUDOKU);
-      await showInterstitialIfDue();
+      const newlyConflicting = cs.has(`${row},${col}`);
+      playSound(newlyConflicting ? 'error' : 'digit_place');
     }
-  }, [gameState, selectedCell, session, isNotesMode, autoRemoveNotes, lightImpact, updateState, loadSolution, markSolved, successNotification]);
+
+    updateState({ ...gameState, board: newBoard });
+
+    if (!isNotesMode) {
+      const sol = await loadSolution();
+      if (sol) await triggerWin(newBoard, sol);
+    }
+  }, [gameState, selectedCell, session, isNotesMode, isPaused, autoRemoveNotes, lightImpact, updateState, loadSolution]);
 
   const handleHintPress = useCallback(async () => {
-    if (!gameState) return;
-    const canUse = useHint();
-    if (!canUse) {
-      // Show rewarded ad to earn hint
-      const granted = await showRewardedAd();
-      if (!granted) return;
-      // Grant the hint manually without decrementing again
-    }
-
-    const sol = await loadSolution();
-    if (!sol) return;
-
-    const hint = SudokuEngine.getHint(gameState, sol);
-    if (!hint) return;
-
-    lightImpact();
-    updateState(hint.revealedState as SudokuEngine.SudokuGameState);
-  }, [gameState, useHint, showRewardedAd, loadSolution, lightImpact, updateState]);
+    if (!gameState || isPaused) return;
+    const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
+    const sol = await loadSolution(); if (!sol) return;
+    const hint = SudokuEngine.getHint(gameState, sol); if (!hint) return;
+    lightImpact(); playSound('hint');
+    const hintedBoard = (hint.revealedState as { board: ExtendedBoard }).board;
+    updateState(hint.revealedState as SudokuEngine.SudokuGameState & { board: ExtendedBoard });
+    await triggerWin(hintedBoard, sol);
+  }, [gameState, isPaused, useHint, showRewardedAd, loadSolution, lightImpact, updateState]);
 
   const handleErase = useCallback(() => {
-    if (!gameState || !selectedCell || session?.isSolved) return;
+    if (!gameState || !selectedCell || session?.isSolved || isPaused) return;
     const { row, col } = selectedCell;
-    const cell = gameState.board[row][col];
-    if (cell.isGiven) return;
+    if (gameState.board[row][col].isGiven) return;
     lightImpact();
-    const newBoard = gameState.board.map((r, ri) =>
-      r.map((c, ci) =>
-        ri === row && ci === col
-          ? { ...c, value: 0 as const, notes: new Set<SudokuDigit>(), isError: false }
-          : { ...c, notes: new Set(c.notes) }
-      )
+    // When erasing, recompute conflicts without this cell's value
+    const newBoard: ExtendedBoard = gameState.board.map((r, ri) =>
+      r.map((c, ci) => {
+        if (ri === row && ci === col) return { ...c, value: 0 as const, notes: new Set<SudokuDigit>(), isError: false, isWrongEntry: false };
+        return c;
+      })
     );
-    updateState({ ...gameState, board: newBoard });
-  }, [gameState, selectedCell, session?.isSolved, lightImpact, updateState]);
+    // Clear victims in same group since the conflicting value is now gone
+    const sameGroup = (r: number, c: number) =>
+      r === row || c === col ||
+      (Math.floor(r / 3) === Math.floor(row / 3) && Math.floor(c / 3) === Math.floor(col / 3));
+    const cleared = newBoard.map((r, ri) => r.map((cell, ci) =>
+      cell.isError && sameGroup(ri, ci) ? { ...cell, isError: false } : cell
+    ));
+    updateState({ ...gameState, board: cleared });
+  }, [gameState, selectedCell, session?.isSolved, isPaused, lightImpact, updateState]);
 
   const toggleNotesMode = useCallback(() => {
-    if (!gameState) return;
+    if (!gameState || isPaused) return;
     lightImpact();
     updateState({ ...gameState, isNotesMode: !isNotesMode }, false);
-  }, [gameState, isNotesMode, lightImpact, updateState]);
+  }, [gameState, isNotesMode, isPaused, lightImpact, updateState]);
 
-  if (!board || !session) {
-    return (
-      <View className="flex-1 items-center justify-center bg-navy-950">
-        <Text className="text-text-secondary font-sans">Loading puzzle...</Text>
-      </View>
-    );
+  const handlePauseToggle = useCallback(() => {
+    if (isPaused) resumeTimer(); else { pauseTimer(); doSaveProgress(); }
+  }, [isPaused, pauseTimer, resumeTimer, doSaveProgress]);
+
+  const handleConfirmReset = useCallback(() => {
+    if (!gameState) return;
+    setShowResetConfirm(false);
+    const pd = puzzleData as SudokuEngine.SudokuPuzzleData;
+    useGameSessionStore.setState(s => ({
+      session: s.session ? { ...s.session, currentState: { board: buildInitialBoard(pd.grid), selectedCell: null, isNotesMode: false }, undoStack: [] } : null,
+    }));
+  }, [gameState, puzzleData]);
+
+  if (!initialized) {
+    return <ResumeModal visible={showResumeModal} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResumeModal(false); continueFromSave(); }} onRestart={() => { setShowResumeModal(false); clearProgress(puzzleId); startFresh(); }} />;
   }
 
-  // Highlight: same row, col, box, or same digit
+  if (!board || !session) {
+    return <View style={[styles.loading, { backgroundColor: t.background }]}><Text style={{ color: t.textSecondary, fontFamily: 'SpaceGrotesk-Regular' }}>Loading…</Text></View>;
+  }
+
   const getHighlighted = (r: number, c: number) => {
     if (!selectedCell) return false;
     const { row, col } = selectedCell;
     if (r === row || c === col) return true;
-    const boxRow = Math.floor(row / 3);
-    const boxCol = Math.floor(col / 3);
-    if (Math.floor(r / 3) === boxRow && Math.floor(c / 3) === boxCol) return true;
+    if (Math.floor(r / 3) === Math.floor(row / 3) && Math.floor(c / 3) === Math.floor(col / 3)) return true;
     const sv = board[row][col].value;
-    if (sv !== 0 && board[r][c].value === sv) return true;
-    return false;
+    return sv !== 0 && board[r][c].value === sv;
   };
 
-  const GameBoard = (
-    <View
-      style={{
-        width: boardSize,
-        height: boardSize,
-        borderWidth: 2,
-        borderColor: '#374151',
-      }}
-    >
-      {board.map((row, ri) => (
-        <View key={ri} style={{ flexDirection: 'row' }}>
-          {row.map((cell, ci) => (
-            <CellView
-              key={ci}
-              cell={cell}
-              row={ri}
-              col={ci}
-              isSelected={selectedCell?.row === ri && selectedCell?.col === ci}
-              isHighlighted={getHighlighted(ri, ci)}
-              isConflict={cell.isError}
-              cellSize={cellSize}
-              onPress={() => handleCellPress(ri, ci)}
-            />
-          ))}
-        </View>
-      ))}
-    </View>
-  );
-
-  const Controls = (
-    <View className={isTablet ? 'flex-1 pl-6' : 'mt-4'}>
-      {/* Timer + controls row */}
-      <View className="flex-row items-center justify-between mb-4">
-        <GameTimer />
-        <View className="flex-row gap-2">
-          <TouchableOpacity
-            onPress={() => undo()}
-            className="bg-surface rounded-xl px-3 py-2"
-            accessibilityLabel="Undo last move"
-          >
-            <Text className="text-text-primary font-sans text-sm">↩ Undo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={toggleNotesMode}
-            className={`rounded-xl px-3 py-2 ${isNotesMode ? 'bg-game-sudoku' : 'bg-surface'}`}
-            accessibilityLabel={`Notes mode ${isNotesMode ? 'on' : 'off'}`}
-          >
-            <Text className={`font-sans text-sm ${isNotesMode ? 'text-white' : 'text-text-primary'}`}>
-              ✏️ Notes
-            </Text>
-          </TouchableOpacity>
-          <HintButton
-            hintsRemaining={session.hintsRemaining}
-            onPress={handleHintPress}
-          />
-        </View>
-      </View>
-
-      {/* Digit pad */}
-      <View className="flex-row flex-wrap gap-2">
-        {([1, 2, 3, 4, 5, 6, 7, 8, 9] as SudokuDigit[]).map((d) => (
-          <TouchableOpacity
-            key={d}
-            onPress={() => handleDigitPress(d)}
-            className="bg-surface rounded-xl items-center justify-center border border-border-subtle"
-            style={{ width: 44, height: 52 }}
-            accessibilityLabel={`Enter ${d}`}
-            accessibilityRole="button"
-          >
-            <Text className="text-text-primary font-sans-bold text-xl">{d}</Text>
-          </TouchableOpacity>
-        ))}
-        <TouchableOpacity
-          onPress={handleErase}
-          className="bg-surface rounded-xl items-center justify-center border border-border-subtle"
-          style={{ width: 44, height: 52 }}
-          accessibilityLabel="Erase cell"
-          accessibilityRole="button"
-        >
-          <Text className="text-text-secondary font-sans text-lg">⌫</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  const actionBg = isDark ? '#1f2937' : '#f3f4f6';
+  const iconColor = isDark ? '#e5e7eb' : '#374151';
 
   return (
-    <View className={`flex-1 px-4 pt-2 ${isTablet ? 'flex-row items-start' : 'items-center'}`}>
-      {/* Back button */}
-      <TouchableOpacity
-        onPress={() => router.back()}
-        className="absolute top-2 left-4 z-10"
-        accessibilityLabel="Go back"
-      >
-        <Text className="text-text-secondary font-sans text-base">←</Text>
-      </TouchableOpacity>
+    <View style={[styles.root, { backgroundColor: t.background }]}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn} accessibilityLabel="Go back">
+          <Text style={[styles.backText, { color: t.textSecondary }]}>←</Text>
+        </TouchableOpacity>
+        <GameTimer />
+        <TouchableOpacity onPress={handlePauseToggle} style={[styles.pauseBtn, { backgroundColor: t.surface2 }]} accessibilityLabel={isPaused ? 'Resume' : 'Pause'}>
+          <Text style={styles.pauseIcon}>{isPaused ? '▶' : '⏸'}</Text>
+        </TouchableOpacity>
+      </View>
 
-      <Animated.View style={completionStyle}>
-        {GameBoard}
-      </Animated.View>
+      <ScrollView contentContainerStyle={[styles.scroll, isTablet && styles.scrollTablet]} showsVerticalScrollIndicator={false}>
+        <Animated.View style={[completionStyle, { marginTop: 8 }]}>
+          <View style={{ width: boardSize, height: boardSize, borderTopWidth: 2, borderLeftWidth: 2, borderColor: isDark ? '#374151' : '#6b7280' }}>
+            {board.map((row, ri) => (
+              <View key={ri} style={{ flexDirection: 'row' }}>
+                {row.map((cell, ci) => (
+                  <CellView key={ci} cell={cell} row={ri} col={ci}
+                    isSelected={selectedCell?.row === ri && selectedCell?.col === ci}
+                    isHighlighted={getHighlighted(ri, ci)}
+                    cellSize={cellSize} onPress={() => handleCellPress(ri, ci)} isDark={isDark} />
+                ))}
+              </View>
+            ))}
+          </View>
+        </Animated.View>
 
-      {Controls}
+        <View style={[styles.controls, isTablet && styles.controlsTablet]}>
+          {/* Action row: Undo, Notes, Erase, Reset, Hint */}
+          <View style={styles.actionRow}>
+            {[
+              { icon: '↩', label: 'Undo', onPress: () => { undo(); playSound('undo'); } },
+              { icon: '✏️', label: 'Notes', onPress: toggleNotesMode, active: isNotesMode },
+              { icon: '⌫', label: 'Erase', onPress: handleErase },
+              { icon: '🔄', label: 'Reset', onPress: () => setShowResetConfirm(true) },
+            ].map(({ icon, label, onPress, active }) => (
+              <TouchableOpacity key={label} onPress={onPress}
+                style={[styles.actionBtn, { backgroundColor: active ? '#3730a3' : actionBg, borderColor: t.border }]}
+                accessibilityLabel={label}>
+                <Text style={[styles.actionIcon, { color: iconColor }]}>{icon}</Text>
+                <Text style={[styles.actionLabel, { color: active ? '#a5b4fc' : t.textMuted }]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+            <HintButton hintsRemaining={session.hintsRemaining} onPress={handleHintPress} />
+          </View>
 
+          {/* Number pad */}
+          <View style={styles.numPad}>
+            {([1,2,3,4,5,6,7,8,9] as SudokuDigit[]).map(d => (
+              <TouchableOpacity key={d} onPress={() => handleDigitPress(d)} activeOpacity={0.6}
+                style={[styles.numKey, {
+                  backgroundColor: pressedDigit === d ? '#6366f1' : t.surface,
+                  borderColor: pressedDigit === d ? '#6366f1' : t.border,
+                  transform: [{ scale: pressedDigit === d ? 0.92 : 1 }],
+                }]}
+                accessibilityLabel={`Enter ${d}`}>
+                <Text style={[styles.numKeyText, { color: pressedDigit === d ? '#fff' : t.textPrimary }]}>{d}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </ScrollView>
+
+      <PauseModal visible={isPaused && !session.isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} gameName="Sudoku" onResume={resumeTimer} />
+      <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All your progress on this puzzle will be cleared." confirmLabel="Reset" confirmDanger onConfirm={handleConfirmReset} onCancel={() => setShowResetConfirm(false)} />
       {session.isSolved && (
-        <CompletionModal
-          gameType={GameType.SUDOKU}
-          elapsedSeconds={session.elapsedSeconds}
-          hintsUsed={session.hintsUsed}
-          isDaily={isDaily}
-          shareableResult={generateShareableResult({
-            gameType: GameType.SUDOKU,
-            difficulty: session.difficulty,
-            elapsedSeconds: session.elapsedSeconds,
-            hintsUsed: session.hintsUsed,
-            date: new Date().toISOString().slice(0, 10),
-            isDaily,
-          })}
-          onClose={() => router.back()}
-        />
+        <CompletionModal gameType={GameType.SUDOKU} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} isDaily={isDaily}
+          shareableResult={generateShareableResult({ gameType: GameType.SUDOKU, difficulty: session.difficulty, elapsedSeconds: session.elapsedSeconds, hintsUsed: session.hintsUsed, date: new Date().toISOString().slice(0, 10), isDaily })}
+          streak={streak} onClose={() => router.back()} onNextPuzzle={onNextPuzzle} />
       )}
     </View>
   );
 }
 
-
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, paddingTop: 16 },
+  headerBtn: { padding: 8, minWidth: 44, minHeight: 44, justifyContent: 'center' },
+  backText: { fontSize: 22 },
+  pauseBtn: { padding: 8, minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderRadius: 12 },
+  pauseIcon: { fontSize: 18 },
+  scroll: { alignItems: 'center', paddingHorizontal: 16, paddingBottom: 40 },
+  scrollTablet: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', gap: 32 },
+  controls: { width: '100%', marginTop: 20 },
+  controlsTablet: { flex: 1, paddingLeft: 16, maxWidth: 280 },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  actionBtn: { alignItems: 'center', justifyContent: 'center', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10, minWidth: 52, minHeight: 52, borderWidth: 1 },
+  actionIcon: { fontSize: 16, marginBottom: 2 },
+  actionLabel: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 9 },
+  numPad: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+  numKey: { width: '30%', aspectRatio: 1.5, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, minHeight: 52 },
+  numKeyText: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 24 },
+});

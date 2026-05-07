@@ -1,9 +1,10 @@
-import { Controller, Get, Patch, Body, UseGuards, Param } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Patch, Delete, Body, UseGuards, Param, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { UpdateNotificationsDto, UpdateSettingsDto } from './users.dto';
+import { UpdateNotificationsDto, UpdateSettingsDto, UpdateUsernameDto } from './users.dto';
 import { CurrentUser, JwtPayload } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { GameType } from '@puzzle-roll/shared';
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -13,7 +14,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('me')
-  @ApiOperation({ summary: 'Get current user profile with settings and stats' })
+  @ApiOperation({ summary: 'Get current user profile' })
   async getMe(@CurrentUser() user: JwtPayload) {
     return this.usersService.getMe(user.sub);
   }
@@ -22,6 +23,26 @@ export class UsersController {
   @ApiOperation({ summary: 'Get current user stats for all game types' })
   async getStats(@CurrentUser() user: JwtPayload) {
     return this.usersService.getStats(user.sub);
+  }
+
+  @Patch('me/username')
+  @ApiOperation({ summary: 'Set or update display username (shown on leaderboards)' })
+  async updateUsername(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateUsernameDto
+  ) {
+    return this.usersService.updateUsername(user.sub, dto);
+  }
+
+  @Delete('me/stats')
+  @ApiOperation({ summary: 'Clear stats — all games or a specific game type' })
+  @ApiQuery({ name: 'gameType', required: false, enum: GameType })
+  async clearStats(
+    @CurrentUser() user: JwtPayload,
+    @Query('gameType') gameType?: GameType
+  ) {
+    await this.usersService.clearStats(user.sub, gameType);
+    return { message: 'Stats cleared' };
   }
 
   @Patch('me/notifications')
@@ -43,7 +64,7 @@ export class UsersController {
   }
 
   @Get(':userId/stats')
-  @ApiOperation({ summary: 'Get stats for a specific user (for leaderboard profiles)' })
+  @ApiOperation({ summary: 'Get stats for a specific user (leaderboard profiles)' })
   async getUserStats(@Param('userId') userId: string) {
     return this.usersService.getStats(userId);
   }

@@ -1,30 +1,31 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { prisma } from '@puzzle-roll/database';
 import { CompleteGameDto, SyncProgressDto } from './progress.dto';
 import { UsersService } from '../users/users.service';
+import { GameType } from '@puzzle-roll/shared';
+import { PrismaService } from '../common/prisma/prisma.service';
 
 @Injectable()
 export class ProgressService {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService, private readonly prisma: PrismaService) {}
 
   async completeGame(userId: string, dto: CompleteGameDto) {
     // Verify puzzle exists
-    const puzzle = await prisma.gamePuzzle.findUnique({ where: { id: dto.puzzleId } });
+    const puzzle = await this.prisma.gamePuzzle.findUnique({ where: { id: dto.puzzleId } });
     if (!puzzle) throw new NotFoundException(`Puzzle ${dto.puzzleId} not found`);
 
     // Idempotent — if already completed, return existing
-    const existing = await prisma.gameCompletion.findUnique({
+    const existing = await this.prisma.gameCompletion.findUnique({
       where: { userId_puzzleId: { userId, puzzleId: dto.puzzleId } },
     });
     if (existing) return existing;
 
-    const completion = await prisma.gameCompletion.create({
+    const completion = await this.prisma.gameCompletion.create({
       data: {
         userId,
         puzzleId: dto.puzzleId,
         dailyPuzzleId: dto.dailyPuzzleId ?? null,
-        gameType: dto.gameType as Parameters<typeof prisma.gameCompletion.create>[0]['data']['gameType'],
-        difficulty: dto.difficulty as Parameters<typeof prisma.gameCompletion.create>[0]['data']['difficulty'],
+        gameType: dto.gameType as Parameters<typeof this.prisma.gameCompletion.create>[0]['data']['gameType'],
+        difficulty: dto.difficulty as Parameters<typeof this.prisma.gameCompletion.create>[0]['data']['difficulty'],
         isDaily: dto.isDaily,
         elapsedSeconds: dto.elapsedSeconds,
         hintsUsed: dto.hintsUsed,
@@ -64,7 +65,7 @@ export class ProgressService {
       throw new NotFoundException('Progress not found');
     }
 
-    const completions = await prisma.gameCompletion.findMany({
+    const completions = await this.prisma.gameCompletion.findMany({
       where: { userId },
       orderBy: { completedAt: 'desc' },
       take: 100,
@@ -81,7 +82,7 @@ export class ProgressService {
       },
     });
 
-    const stats = await prisma.userStats.findMany({
+    const stats = await this.prisma.userStats.findMany({
       where: { userId },
       orderBy: { gameType: 'asc' },
     });
@@ -89,11 +90,11 @@ export class ProgressService {
     return { completions, stats };
   }
 
-  async hasCompletedDaily(userId: string, gameType: string, date: string): Promise<boolean> {
-    const daily = await prisma.dailyPuzzle.findUnique({
+  async hasCompletedDaily(userId: string, gameType: GameType, date: string): Promise<boolean> {
+    const daily = await this.prisma.dailyPuzzle.findUnique({
       where: {
         gameType_date: {
-          gameType: gameType as Parameters<typeof prisma.dailyPuzzle.findUnique>[0]['where']['gameType_date']['gameType'],
+          gameType: gameType,
           date,
         },
       },
@@ -101,7 +102,7 @@ export class ProgressService {
 
     if (!daily) return false;
 
-    const completion = await prisma.gameCompletion.findFirst({
+    const completion = await this.prisma.gameCompletion.findFirst({
       where: { userId, dailyPuzzleId: daily.id },
     });
 

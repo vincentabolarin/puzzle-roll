@@ -1,1 +1,1 @@
-export { generatePuzzle } from '../../packages/shared/src/engines/hitori';
+export { generateHitori } from '@puzzle-roll/shared';

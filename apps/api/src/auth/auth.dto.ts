@@ -1,35 +1,49 @@
-import { IsEmail, IsString, MinLength, IsOptional, IsUUID } from 'class-validator';
+import {
+  IsEmail, IsString, MinLength, MaxLength,
+  IsOptional, IsUUID, Matches,
+} from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+/** Trim and lowercase email before validation */
+function transformEmail({ value }: { value: unknown }): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
 
 export class RegisterDto {
   @ApiProperty({ example: 'user@example.com' })
-  @IsEmail()
-  email: string;
+  @Transform(transformEmail)
+  @IsEmail({}, { message: 'Invalid email address' })
+  email!: string;
 
   @ApiProperty({ example: 'securePassword123', minLength: 8 })
   @IsString()
-  @MinLength(8)
-  password: string;
+  @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @MaxLength(72, { message: 'Password too long' }) // bcrypt max
+  password!: string;
 }
 
 export class LoginDto {
   @ApiProperty({ example: 'user@example.com' })
-  @IsEmail()
-  email: string;
+  @Transform(transformEmail)
+  @IsEmail({}, { message: 'Invalid email address' })
+  email!: string;
 
-  @ApiProperty({ example: 'securePassword123' })
+  @ApiProperty()
   @IsString()
-  password: string;
+  @MinLength(1)
+  password!: string;
 }
 
 export class RefreshTokenDto {
   @ApiProperty()
   @IsString()
-  refreshToken: string;
+  @MinLength(1)
+  refreshToken!: string;
 }
 
 export class AnonymousSessionDto {
-  @ApiPropertyOptional({ description: 'Existing device UUID, omit for new anonymous session' })
+  @ApiPropertyOptional({ description: 'Existing device UUID — omit for new anonymous session' })
   @IsOptional()
   @IsUUID()
   deviceId?: string;
@@ -37,25 +51,20 @@ export class AnonymousSessionDto {
 
 export class UpgradeAccountDto {
   @ApiProperty()
-  @IsEmail()
-  email: string;
+  @Transform(transformEmail)
+  @IsEmail({}, { message: 'Invalid email address' })
+  email!: string;
 
   @ApiProperty({ minLength: 8 })
   @IsString()
-  @MinLength(8)
-  password: string;
+  @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @MaxLength(72)
+  password!: string;
 }
 
 export class AuthResponseDto {
-  @ApiProperty()
-  accessToken: string;
-
-  @ApiProperty()
-  refreshToken: string;
-
-  @ApiProperty()
-  userId: string;
-
-  @ApiProperty()
-  isAnonymous: boolean;
+  @ApiProperty() accessToken!: string;
+  @ApiProperty() refreshToken!: string;
+  @ApiProperty() userId!: string;
+  @ApiProperty() isAnonymous!: boolean;
 }

@@ -1,9 +1,9 @@
-import { Difficulty } from '../../types/core';
-import { generatePuzzle } from '../sudoku/generator';
-import { solve, hasUniqueSolution, isSolved, copyGrid, getCandidates, isValidPlacement } from '../sudoku/solver';
-import { boardStateToGrid, isBoardSolved, getBoardConflicts } from '../sudoku/validator';
-import { getHint } from '../sudoku/hints';
-import { SudokuBoardState, SudokuCellState, SudokuGrid } from '../sudoku/types';
+import { Difficulty } from '../../../types/core';
+import { generatePuzzle } from '../../sudoku/generator';
+import { solve, hasUniqueSolution, isSolved, copyGrid, getCandidates, isValidPlacement } from '../../sudoku/solver';
+import { boardStateToGrid, isBoardSolved, getBoardConflicts } from '../../sudoku/validator';
+import { getHint } from '../../sudoku/hints';
+import { SudokuBoardState, SudokuCellState, SudokuGrid } from '../../sudoku/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

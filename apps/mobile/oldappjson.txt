@@ -1,4 +1,8 @@
 {
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-3940256099942544~3347511713",
+    "ios_app_id": "ca-app-pub-3940256099942544~1458002511"
+  },
   "expo": {
     "name": "Puzzle Roll",
     "slug": "puzzle-roll",
@@ -12,7 +16,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#060818"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "scheme": "puzzleroll",
     "ios": {
       "supportsTablet": true,
@@ -43,16 +49,18 @@
           "sounds": []
         }
       ],
-      [
-        "react-native-google-mobile-ads",
-        {
-          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
-          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
-        }
-      ]
+      "expo-font",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "$EXPO_PUBLIC_PROJECT_ID"
+      }
+    },
+    "owner": "vincentabolarin"
   }
 }

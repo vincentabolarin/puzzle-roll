@@ -9,6 +9,7 @@ export interface AuthUser {
   id: string;
   email: string | null;
   isAnonymous: boolean;
+  username?: string | null;
 }
 
 interface AuthState {
@@ -26,6 +27,7 @@ interface AuthActions {
   getAccessToken: () => string | null;
   getDeviceId: () => Promise<string>;
   updateAccessToken: (accessToken: string) => Promise<void>;
+  setUsername: (username: string) => void;
 }
 
 export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
@@ -52,7 +54,6 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
       const accessToken = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
       const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
       if (accessToken && refreshToken) {
-        // Decode userId from JWT without verifying (server will verify)
         const payload = JSON.parse(atob(accessToken.split('.')[1]));
         set({
           accessToken,
@@ -61,6 +62,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
             id: payload.sub as string,
             email: payload.email as string | null,
             isAnonymous: payload.isAnonymous as boolean,
+            username: (payload.username as string | null) ?? null,
           },
           isHydrated: true,
         });
@@ -77,7 +79,6 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
   getDeviceId: async () => {
     let deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
     if (!deviceId) {
-      // Generate a UUID-like device ID
       deviceId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0;
         const v = c === 'x' ? r : (r & 0x3) | 0x8;
@@ -91,5 +92,9 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
   updateAccessToken: async (accessToken) => {
     await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, accessToken);
     set({ accessToken });
+  },
+
+  setUsername: (username) => {
+    set((s) => ({ user: s.user ? { ...s.user, username } : null }));
   },
 }));

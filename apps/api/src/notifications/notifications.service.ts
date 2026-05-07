@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
-import { prisma } from '@puzzle-roll/database';
+import { DateTime } from 'luxon';
+import { PrismaService } from '../common/prisma/prisma.service';
 
 export const NOTIFICATION_QUEUE = 'notifications';
 export const DAILY_PUZZLE_ROTATION_QUEUE = 'daily-puzzle-rotation';
@@ -12,14 +13,40 @@ export interface DailyReminderJobData {
   pushToken: string;
   preferredGame: string | null;
   notificationHour: number;
-  timezoneOffsetMinutes: number;
+  timezone: string;
 }
 
 export interface StreakNudgeJobData {
   userId: string;
   pushToken: string;
   streakDays: number;
-  timezoneOffsetMinutes: number;
+  timezone: string;
+}
+
+/**
+ * Compute the millisecond delay from now until the next occurrence of
+ * `targetHour:00:00` in the user's IANA timezone.
+ * Returns null if the target time has already passed today and there is no
+ * meaningful delay (caller should skip or schedule for tomorrow).
+ */
+function msUntilLocalHour(timezone: string, targetHour: number): number {
+  const safeZone = isValidTimezone(timezone) ? timezone : 'UTC';
+  const now = DateTime.now().setZone(safeZone);
+  let target = now.set({ hour: targetHour, minute: 0, second: 0, millisecond: 0 });
+  if (target <= now) {
+    // Already past today — schedule for the same time tomorrow
+    target = target.plus({ days: 1 });
+  }
+  return target.toMillis() - now.toMillis();
+}
+
+function isValidTimezone(tz: string): boolean {
+  try {
+    DateTime.now().setZone(tz);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 @Injectable()
@@ -28,7 +55,8 @@ export class NotificationsService {
   private readonly expo = new Expo({ accessToken: process.env.EXPO_ACCESS_TOKEN });
 
   constructor(
-    @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue
+    @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
+    private readonly prisma: PrismaService
   ) {}
 
   async sendPushNotifications(messages: ExpoPushMessage[]): Promise<void> {
@@ -38,7 +66,6 @@ export class NotificationsService {
       try {
         const tickets: ExpoPushTicket[] = await this.expo.sendPushNotificationsAsync(chunk);
 
-        // Log any errors but don't throw — notification failure should never crash the server
         for (const ticket of tickets) {
           if (ticket.status === 'error') {
             this.logger.warn(`Push notification error: ${ticket.message}`, ticket.details);
@@ -51,8 +78,7 @@ export class NotificationsService {
   }
 
   async enqueueDailyReminders(): Promise<void> {
-    // Fetch all opted-in users with push tokens
-    const users = await prisma.userSettings.findMany({
+    const users = await this.prisma.userSettings.findMany({
       where: { notificationEnabled: true },
       include: {
         user: {
@@ -64,23 +90,13 @@ export class NotificationsService {
       },
     });
 
-    const now = new Date();
-
     for (const settings of users) {
       for (const pushToken of settings.user.pushTokens) {
         if (!Expo.isExpoPushToken(pushToken.token)) continue;
 
         const preferredGame = settings.user.stats[0]?.gameType ?? null;
-
-        // Calculate delay so notification fires at user's preferred local hour
-        const targetHour = settings.notificationHour;
-        const offsetMs = settings.timezoneOffsetMinutes * 60 * 1000;
-        const userLocalNow = new Date(now.getTime() + offsetMs);
-        const targetLocal = new Date(userLocalNow);
-        targetLocal.setUTCHours(targetHour, 0, 0, 0);
-
-        let delayMs = targetLocal.getTime() - userLocalNow.getTime();
-        if (delayMs < 0) delayMs += 86400000; // next day
+        const timezone = settings.timezone ?? 'UTC';
+        const delayMs = msUntilLocalHour(timezone, settings.notificationHour);
 
         await this.notificationQueue.add(
           'daily-reminder',
@@ -88,8 +104,8 @@ export class NotificationsService {
             userId: settings.userId,
             pushToken: pushToken.token,
             preferredGame,
-            notificationHour: targetHour,
-            timezoneOffsetMinutes: settings.timezoneOffsetMinutes,
+            notificationHour: settings.notificationHour,
+            timezone,
           } satisfies DailyReminderJobData,
           { delay: delayMs, attempts: 2 }
         );
@@ -102,8 +118,7 @@ export class NotificationsService {
   async enqueueStreakNudges(): Promise<void> {
     const today = new Date().toISOString().slice(0, 10);
 
-    // Find users with active streaks >= 3 who haven't played today
-    const usersWithStreaks = await prisma.userStats.findMany({
+    const usersWithStreaks = await this.prisma.userStats.findMany({
       where: { currentStreak: { gte: 3 } },
       include: {
         user: {
@@ -119,8 +134,7 @@ export class NotificationsService {
       const settings = stat.user.settings;
       if (!settings?.notificationEnabled) continue;
 
-      // Check if user has played any daily puzzle today
-      const playedToday = await prisma.gameCompletion.findFirst({
+      const playedToday = await this.prisma.gameCompletion.findFirst({
         where: {
           userId: stat.userId,
           isDaily: true,
@@ -133,15 +147,17 @@ export class NotificationsService {
       for (const pushToken of stat.user.pushTokens) {
         if (!Expo.isExpoPushToken(pushToken.token)) continue;
 
-        // Schedule for 20:00 local time
-        const now = new Date();
-        const offsetMs = (settings.timezoneOffsetMinutes ?? 0) * 60 * 1000;
-        const userLocalNow = new Date(now.getTime() + offsetMs);
-        const targetLocal = new Date(userLocalNow);
-        targetLocal.setUTCHours(20, 0, 0, 0);
+        const timezone = settings.timezone ?? 'UTC';
 
-        let delayMs = targetLocal.getTime() - userLocalNow.getTime();
-        if (delayMs < 0) continue; // already past 20:00 local — don't send
+        // Schedule nudge for 20:00 in the user's local timezone.
+        // If 20:00 has already passed today, skip — it's too late to nudge.
+        const safeZone = isValidTimezone(timezone) ? timezone : 'UTC';
+        const now = DateTime.now().setZone(safeZone);
+        const target = now.set({ hour: 20, minute: 0, second: 0, millisecond: 0 });
+
+        if (target <= now) continue; // already past 20:00 local
+
+        const delayMs = target.toMillis() - now.toMillis();
 
         await this.notificationQueue.add(
           'streak-nudge',
@@ -149,7 +165,7 @@ export class NotificationsService {
             userId: stat.userId,
             pushToken: pushToken.token,
             streakDays: stat.currentStreak,
-            timezoneOffsetMinutes: settings.timezoneOffsetMinutes ?? 0,
+            timezone,
           } satisfies StreakNudgeJobData,
           { delay: delayMs, attempts: 2 }
         );

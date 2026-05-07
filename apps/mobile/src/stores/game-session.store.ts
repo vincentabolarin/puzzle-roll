@@ -11,7 +11,12 @@ export interface ActiveSession<TState = unknown> {
   completedAt: Date | null;
   hintsUsed: number;
   hintsRemaining: number;
+  /** Integer tick count — kept for display only, incremented every second */
   elapsedSeconds: number;
+  /** Accumulated elapsed seconds from previous play segments (before current resume) */
+  accumulatedSeconds: number;
+  /** Wall-clock timestamp of when the current active segment started (null if paused) */
+  segmentStartMs: number | null;
   isPaused: boolean;
   isSolved: boolean;
   undoStack: TState[];
@@ -31,6 +36,9 @@ interface GameSessionActions {
     isDaily: boolean;
     dailyPuzzleId: string | null;
     initialState: TState;
+    initialElapsedSeconds?: number;
+    initialHintsUsed?: number;
+    initialHintsRemaining?: number;
   }) => void;
   updateState: <TState>(newState: TState, pushToUndo?: boolean) => void;
   undo: () => void;
@@ -39,6 +47,7 @@ interface GameSessionActions {
   pauseTimer: () => void;
   resumeTimer: () => void;
   clearSession: () => void;
+  /** Returns real elapsed seconds computed from wall clock — use this for submission */
   getElapsed: () => number;
 }
 
@@ -46,7 +55,12 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
   session: null,
   timerInterval: null,
 
-  startSession: ({ puzzleId, gameType, difficulty, isDaily, dailyPuzzleId, initialState }) => {
+  startSession: ({
+    puzzleId, gameType, difficulty, isDaily, dailyPuzzleId, initialState,
+    initialElapsedSeconds = 0,
+    initialHintsUsed = 0,
+    initialHintsRemaining = 3,
+  }) => {
     const { timerInterval } = get();
     if (timerInterval) clearInterval(timerInterval);
 
@@ -69,9 +83,11 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
         dailyPuzzleId,
         startedAt: new Date(),
         completedAt: null,
-        hintsUsed: 0,
-        hintsRemaining: 3,
-        elapsedSeconds: 0,
+        hintsUsed: initialHintsUsed,
+        hintsRemaining: initialHintsRemaining,
+        elapsedSeconds: initialElapsedSeconds,
+        accumulatedSeconds: initialElapsedSeconds,
+        segmentStartMs: Date.now(),
         isPaused: false,
         isSolved: false,
         undoStack: [],
@@ -87,13 +103,7 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
       const undoStack = pushToUndo
         ? [...s.session.undoStack.slice(-19), s.session.currentState]
         : s.session.undoStack;
-      return {
-        session: {
-          ...s.session,
-          currentState: newState,
-          undoStack,
-        },
-      };
+      return { session: { ...s.session, currentState: newState, undoStack } };
     });
   },
 
@@ -102,13 +112,7 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
       if (!s.session || s.session.undoStack.length === 0) return s;
       const undoStack = [...s.session.undoStack];
       const previousState = undoStack.pop();
-      return {
-        session: {
-          ...s.session,
-          currentState: previousState,
-          undoStack,
-        },
-      };
+      return { session: { ...s.session, currentState: previousState, undoStack } };
     });
   },
 
@@ -117,36 +121,59 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
     if (!session || session.hintsRemaining <= 0) return false;
     set((s) => ({
       session: s.session
-        ? {
-            ...s.session,
-            hintsUsed: s.session.hintsUsed + 1,
-            hintsRemaining: s.session.hintsRemaining - 1,
-          }
+        ? { ...s.session, hintsUsed: s.session.hintsUsed + 1, hintsRemaining: s.session.hintsRemaining - 1 }
         : null,
     }));
     return true;
   },
 
   markSolved: () => {
-    const { timerInterval } = get();
+    const { timerInterval, session } = get();
     if (timerInterval) clearInterval(timerInterval);
+    // Freeze elapsed at real wall-clock time
+    const realElapsed = session ? get().getElapsed() : 0;
     set((s) => ({
       session: s.session
-        ? { ...s.session, isSolved: true, completedAt: new Date(), isPaused: true }
+        ? {
+            ...s.session,
+            isSolved: true,
+            completedAt: new Date(),
+            isPaused: true,
+            segmentStartMs: null,
+            elapsedSeconds: realElapsed,
+            accumulatedSeconds: realElapsed,
+          }
         : null,
       timerInterval: null,
     }));
   },
 
   pauseTimer: () => {
+    const { session } = get();
+    if (!session || session.isPaused || session.isSolved) return;
+    const now = Date.now();
+    const segmentSeconds = session.segmentStartMs != null
+      ? Math.floor((now - session.segmentStartMs) / 1000)
+      : 0;
+    const newAccumulated = session.accumulatedSeconds + segmentSeconds;
     set((s) => ({
-      session: s.session ? { ...s.session, isPaused: true } : null,
+      session: s.session
+        ? {
+            ...s.session,
+            isPaused: true,
+            segmentStartMs: null,
+            accumulatedSeconds: newAccumulated,
+            elapsedSeconds: newAccumulated,
+          }
+        : null,
     }));
   },
 
   resumeTimer: () => {
     set((s) => ({
-      session: s.session ? { ...s.session, isPaused: false } : null,
+      session: s.session
+        ? { ...s.session, isPaused: false, segmentStartMs: Date.now() }
+        : null,
     }));
   },
 
@@ -156,5 +183,13 @@ export const useGameSessionStore = create<GameSessionState & GameSessionActions>
     set({ session: null, timerInterval: null });
   },
 
-  getElapsed: () => get().session?.elapsedSeconds ?? 0,
+  getElapsed: () => {
+    const { session } = get();
+    if (!session) return 0;
+    if (session.isPaused || session.isSolved || session.segmentStartMs == null) {
+      return session.accumulatedSeconds;
+    }
+    const segmentSeconds = Math.floor((Date.now() - session.segmentStartMs) / 1000);
+    return session.accumulatedSeconds + segmentSeconds;
+  },
 }));

@@ -3,28 +3,55 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorBoundary } from 'react-error-boundary';
-import { GameType } from '@puzzle-roll/shared';
-import { apiClient } from '../../../src/lib/api-client';
-import { queryKeys } from '../../../src/lib/query-client';
-import { puzzleCache } from '../../../src/services/puzzle-cache.service';
-import { useBreakpoint } from '../../../src/hooks/useBreakpoint';
-import SudokuGame from '../../../src/components/game/SudokuGame';
+import { Difficulty, GameType } from '@puzzle-roll/shared';
+import { apiClient } from '@/lib/api-client';
+import { queryKeys } from '@/lib/query-client';
+import { puzzleCache } from '@/services/puzzle-cache.service';
+import { useBreakpoint } from '@/hooks/useBreakpoint';
+import { useAppTheme } from '@/hooks/useAppTheme';
+import SudokuGame from '@/components/game/SudokuGame';
+import TangoGame from '@/components/game/TangoGame';
+import QueensGame from '@/components/game/QueensGame';
+import ZipGame from '@/components/game/ZipGame';
+import NonogramGame from '@/components/game/NonogramGame';
+import MinesweeperGame from '@/components/game/MinesweeperGame';
+import KakuroGame from '@/components/game/KakuroGame';
+import LightUpGame from '@/components/game/LightUpGame';
+import FutoshikiGame from '@/components/game/FutoshikiGame';
+import HitoriGame from '@/components/game/HitoriGame';
 
-const GAME_COMPONENTS: Partial<Record<GameType, React.ComponentType<{ puzzleId: string; puzzleData: unknown; solution: unknown; isDaily: boolean; dailyPuzzleId: string | null }>>> = {
+type GameProps = {
+  puzzleId: string;
+  puzzleData: unknown;
+  solution: unknown;
+  isDaily: boolean;
+  dailyPuzzleId: string | null;
+  onNextPuzzle?: () => void;
+  puzzleNumber?: number;
+  difficulty?: Difficulty;
+};
+
+const GAME_COMPONENTS: Partial<Record<GameType, React.ComponentType<GameProps>>> = {
   [GameType.SUDOKU]: SudokuGame,
+  [GameType.TANGO]: TangoGame,
+  [GameType.QUEENS]: QueensGame,
+  [GameType.ZIP]: ZipGame,
+  [GameType.NONOGRAM]: NonogramGame,
+  [GameType.MINESWEEPER]: MinesweeperGame,
+  [GameType.KAKURO]: KakuroGame,
+  [GameType.LIGHT_UP]: LightUpGame,
+  [GameType.FUTOSHIKI]: FutoshikiGame,
+  [GameType.HITORI]: HitoriGame,
 };
 
 function GameErrorFallback({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) {
+  const t = useAppTheme();
   return (
-    <View className="flex-1 items-center justify-center px-8 bg-navy-950">
-      <Text className="text-text-primary font-sans-bold text-xl mb-2">Something went wrong</Text>
-      <Text className="text-text-secondary font-sans text-sm text-center mb-6">{error.message}</Text>
-      <TouchableOpacity
-        onPress={resetErrorBoundary}
-        className="bg-game-sudoku rounded-xl px-6 py-3"
-        accessibilityLabel="Try again"
-      >
-        <Text className="text-white font-sans-medium">Try again</Text>
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, backgroundColor: t.background }}>
+      <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 20, marginBottom: 8 }}>Something went wrong</Text>
+      <Text style={{ color: t.textSecondary, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13, textAlign: 'center', marginBottom: 24 }}>{error.message}</Text>
+      <TouchableOpacity onPress={resetErrorBoundary} style={{ backgroundColor: '#6366f1', borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12 }}>
+        <Text style={{ color: '#fff', fontFamily: 'SpaceGrotesk-Medium' }}>Try again</Text>
       </TouchableOpacity>
     </View>
   );
@@ -33,43 +60,64 @@ function GameErrorFallback({ error, resetErrorBoundary }: { error: Error; resetE
 export default function ActivePuzzleScreen() {
   const { gameType, puzzleId } = useLocalSearchParams<{ gameType: string; puzzleId: string }>();
   const { isTablet } = useBreakpoint();
+  const t = useAppTheme();
 
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.puzzles.byId(puzzleId ?? ''),
     queryFn: async () => {
-      // Try SQLite cache first
       const cached = await puzzleCache.getPuzzleById(puzzleId ?? '');
       if (cached) {
         return {
           id: cached.id,
-          gameType: cached.gameType,
+          gameType: cached.gameType as GameType,
           difficulty: cached.difficulty,
           puzzleData: JSON.parse(cached.puzzleData),
-          solution: null, // fetched separately on completion
+          solution: null,
         };
       }
-      return apiClient.get<{ id: string; gameType: string; difficulty: string; puzzleData: unknown }>(`/puzzles/id/${puzzleId}`);
+      return apiClient.get<{ id: string; gameType: GameType; difficulty: string; puzzleData: unknown }>(`/puzzles/id/${puzzleId}`);
     },
     enabled: !!puzzleId,
   });
 
+  const { data: puzzleListResponse } = useQuery({
+    queryKey: [...queryKeys.puzzles.byGame(gameType ?? ''), data?.difficulty],
+    queryFn: () =>
+      apiClient.get<{ data: Array<{ id: string }> }>(`/puzzles/${gameType}?difficulty=${data!.difficulty}&limit=50`),
+    enabled: !!data?.difficulty,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const puzzleList = puzzleListResponse?.data;
+
   const gt = (gameType ?? '') as GameType;
   const GameComponent = GAME_COMPONENTS[gt];
 
+  const puzzleIndex = puzzleList ? puzzleList.findIndex((p) => p.id === puzzleId) : -1;
+  const puzzleNumber = puzzleIndex >= 0 ? puzzleIndex + 1 : undefined;
+  const nextPuzzle = puzzleList && puzzleIndex >= 0 ? puzzleList[(puzzleIndex + 1) % puzzleList.length] : null;
+  const hasNextPuzzle = !!(nextPuzzle && nextPuzzle.id !== puzzleId);
+
+  const handleNextPuzzle = () => {
+    if (!nextPuzzle) return;
+    router.replace(`/game/${gt}/${nextPuzzle.id}`);
+  };
+
   if (isLoading) {
     return (
-      <SafeAreaView className="flex-1 bg-navy-950 items-center justify-center" edges={['top']}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.background, alignItems: 'center', justifyContent: 'center' }} edges={['top']}>
         <ActivityIndicator color="#6366f1" size="large" />
       </SafeAreaView>
     );
   }
 
-  if (error || !data) {
+  // Guard: data or puzzleData undefined means loading failed or API returned unexpected shape
+  if (error || !data || data.puzzleData == null) {
     return (
-      <SafeAreaView className="flex-1 bg-navy-950 items-center justify-center px-8" edges={['top']}>
-        <Text className="text-text-primary font-sans-bold text-xl mb-2">Puzzle not found</Text>
-        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back">
-          <Text className="text-game-sudoku font-sans-medium">← Go back</Text>
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.background, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }} edges={['top']}>
+        <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 20, marginBottom: 8 }}>Puzzle not found</Text>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={{ color: '#6366f1', fontFamily: 'SpaceGrotesk-Medium' }}>← Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -77,28 +125,31 @@ export default function ActivePuzzleScreen() {
 
   if (!GameComponent) {
     return (
-      <SafeAreaView className="flex-1 bg-navy-950 items-center justify-center px-8" edges={['top']}>
-        <Text className="text-text-primary font-sans-bold text-xl mb-2">Coming soon</Text>
-        <Text className="text-text-secondary font-sans text-sm text-center mb-6">
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.background, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }} edges={['top']}>
+        <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 20, marginBottom: 8 }}>Coming soon</Text>
+        <Text style={{ color: t.textSecondary, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13, textAlign: 'center', marginBottom: 24 }}>
           {gt.replace('_', ' ')} is being added in the next update.
         </Text>
-        <TouchableOpacity onPress={() => router.back()} accessibilityLabel="Go back">
-          <Text className="text-game-sudoku font-sans-medium">← Go back</Text>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={{ color: '#6366f1', fontFamily: 'SpaceGrotesk-Medium' }}>← Go back</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-navy-950" edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.background }} edges={['top']}>
       <ErrorBoundary FallbackComponent={GameErrorFallback}>
-        <View className={`flex-1 ${isTablet ? 'flex-row' : ''}`}>
+        <View style={{ flex: 1, flexDirection: isTablet ? 'row' : 'column' }}>
           <GameComponent
             puzzleId={data.id}
             puzzleData={data.puzzleData}
             solution={null}
             isDaily={false}
             dailyPuzzleId={null}
+            puzzleNumber={puzzleNumber}
+            difficulty={data.difficulty as Difficulty}
+            onNextPuzzle={hasNextPuzzle ? handleNextPuzzle : undefined}
           />
         </View>
       </ErrorBoundary>

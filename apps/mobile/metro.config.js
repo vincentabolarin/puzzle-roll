@@ -1,29 +1,20 @@
 const { getDefaultConfig } = require('expo/metro-config');
-const { withNativeWind } = require('nativewind/metro');
+const { withNativeWind } = require("nativewind/metro");
 const path = require('path');
 
-const projectRoot = __dirname;
-const workspaceRoot = path.resolve(projectRoot, '../..');
+const config = getDefaultConfig(__dirname);
 
-const config = getDefaultConfig(projectRoot);
+// SVG support (modern approach)
+config.resolver.assetExts = config.resolver.assetExts.filter(
+  (ext) => ext !== 'svg'
+);
+config.resolver.sourceExts.push('svg');
 
 // Monorepo support
-config.watchFolders = [workspaceRoot];
+config.watchFolders = [path.resolve(__dirname, '../..')];
 config.resolver.nodeModulesPaths = [
-  path.resolve(projectRoot, 'node_modules'),
-  path.resolve(workspaceRoot, 'node_modules'),
+  path.resolve(__dirname, 'node_modules'),
+  path.resolve(__dirname, '../..', 'node_modules'),
 ];
 
-// SVG support
-const { transformer, resolver } = config;
-config.transformer = {
-  ...transformer,
-  babelTransformerPath: require.resolve('react-native-svg-transformer'),
-};
-config.resolver = {
-  ...resolver,
-  assetExts: resolver.assetExts.filter((ext) => ext !== 'svg'),
-  sourceExts: [...resolver.sourceExts, 'svg'],
-};
-
-module.exports = withNativeWind(config, { input: './global.css' });
+module.exports = withNativeWind(config, { input: "./global.css" });

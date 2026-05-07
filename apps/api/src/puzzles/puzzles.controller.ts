@@ -4,6 +4,7 @@ import { PuzzlesService } from './puzzles.service';
 import { GetPuzzlesQueryDto } from './puzzles.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
+import { GameType } from '@puzzle-roll/shared';
 
 @ApiTags('puzzles')
 @ApiBearerAuth()
@@ -14,14 +15,14 @@ export class PuzzlesController {
 
   @Get(':gameType/daily')
   @ApiOperation({ summary: "Get today's daily puzzle for a game type" })
-  async getDailyPuzzle(@Param('gameType') gameType: string) {
+  async getDailyPuzzle(@Param('gameType') gameType: GameType) {
     return this.puzzlesService.getDailyPuzzle(gameType);
   }
 
   @Get(':gameType')
   @ApiOperation({ summary: 'Get paginated puzzles for a game type' })
   async getPuzzles(
-    @Param('gameType') gameType: string,
+    @Param('gameType') gameType: GameType,
     @Query() query: GetPuzzlesQueryDto
   ) {
     return this.puzzlesService.getPuzzles(gameType, query);
