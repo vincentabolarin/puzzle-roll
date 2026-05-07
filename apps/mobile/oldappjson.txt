@@ -31,8 +31,7 @@
         "backgroundColor": "#060818"
       },
       "package": "com.puzzleroll.puzzleroll",
-      "versionCode": 1,
-      "googleServicesFile": "./google-services.json"
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",
@@ -59,7 +58,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "9956dec3-2027-42df-b433-bdfcaa8cad25"
+        "projectId": "$EXPO_PUBLIC_PROJECT_ID"
       }
     },
     "owner": "vincentabolarin"
