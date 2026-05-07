@@ -10,8 +10,9 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
-    shouldShowBanner: false,
-    shouldShowList: false,
+    // true = show banner when the app is in the foreground
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -21,22 +22,18 @@ export function usePushNotifications() {
 
   const registerForPushNotifications = async (): Promise<void> => {
     if (!user || user.isAnonymous) {
-      console.log('[Push] Skipping — user is anonymous or null');
       return;
     }
 
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
-    console.log('[Push] Permission status:', existingStatus);
 
     if (existingStatus !== 'granted') {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
-      console.log('[Push] Requested permissions, got:', status);
     }
 
     if (finalStatus !== 'granted') {
-      console.log('[Push] Permission not granted, aborting');
       return;
     }
 
@@ -57,20 +54,25 @@ export function usePushNotifications() {
       };
 
       if (!tokenRegistered.current) {
-        const projectId = Constants.expoConfig?.extra?.eas?.projectId as string;
-        console.log('[Push] Fetching token with projectId:', projectId);
+        // Prefer Constants (runtime app.json) over the env module so this works
+        // in both Expo Go (dev) and production builds without env file changes.
+        const projectId =
+          (Constants.expoConfig?.extra?.eas?.projectId as string | undefined) ??
+          process.env.EXPO_PUBLIC_PROJECT_ID;
+
+
+        if (!projectId) {
+          return;
+        }
+
         const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-        console.log('[Push] Got token:', tokenData.data);
         payload.pushToken = tokenData.data;
         payload.platform = Platform.OS;
         tokenRegistered.current = true;
       }
 
-      console.log('[Push] Sending PATCH with keys:', Object.keys(payload));
       await apiClient.patch('/users/me/notifications', payload);
-      console.log('[Push] PATCH succeeded — PushToken should now be in DB');
     } catch (err) {
-      console.error('[Push] Registration failed:', err);
     }
   };
 
@@ -80,7 +82,7 @@ export function usePushNotifications() {
         screen?: string;
         gameType?: string;
       };
-      // Navigation handled by deep link scheme in app.json
+      // Navigation on tap is handled by deep link scheme in app.json
     });
 
     return () => subscription.remove();

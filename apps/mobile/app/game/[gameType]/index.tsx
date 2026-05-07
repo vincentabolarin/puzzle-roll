@@ -90,7 +90,7 @@ function DailyResultModal({
 
 export default function GameLobbyScreen() {
   const { gameType } = useLocalSearchParams<{ gameType: GameType }>();
-  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(Difficulty.MEDIUM);
+  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(Difficulty.EASY);
   const [showDailyResult, setShowDailyResult] = useState(false);
   // Subscribe to the sets directly so the component re-renders when they change
   const completedPuzzleIds = usePuzzleProgressStore(s => s.completedPuzzleIds);
