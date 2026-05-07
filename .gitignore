@@ -11,3 +11,6 @@ coverage/
 .DS_Store
 ios/
 android/
+
+*/google-services.json
+apps/mobile/google-services.json
