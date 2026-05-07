@@ -18,6 +18,31 @@ import { PrismaModule } from './common/prisma/prisma.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env', '.env.local'],
+      validate(config: Record<string, unknown>) {
+        const required = ['DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'JWT_EXPIRES_IN', 'JWT_REFRESH_EXPIRES_IN', 'PORT', 'NODE_ENV'];
+        const missing = required.filter((k) => !config[k]);
+        if (missing.length > 0) {
+          throw new Error(
+            `Missing required environment variables: ${missing.join(', ')}.\n` +
+            `Check your .env file or Dokploy environment settings.`
+          );
+        }
+        if ((config['JWT_SECRET'] as string)?.length < 32) {
+          throw new Error('JWT_SECRET must be at least 32 characters long.');
+        }
+        if ((config['JWT_REFRESH_SECRET'] as string)?.length < 32) {
+          throw new Error('JWT_REFRESH_SECRET must be at least 32 characters long.');
+        }
+        return {
+          ...config,
+          PORT: parseInt(config['PORT'] as string, 10) || 3000,
+          DB_POOL_MAX: parseInt(config['DB_POOL_MAX'] as string, 10) || 10,
+          JWT_EXPIRES_IN: config['JWT_EXPIRES_IN'] || '15m',
+          JWT_REFRESH_EXPIRES_IN: config['JWT_REFRESH_EXPIRES_IN'] || '7d',
+          REDIS_URL: config['REDIS_URL'] || 'redis://localhost:6379',
+          NODE_ENV: config['NODE_ENV'] || 'development',
+        };
+      },
     }),
 
     ThrottlerModule.forRoot([
