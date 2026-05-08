@@ -57,7 +57,9 @@ export const ModelName = {
   UserStats: 'UserStats',
   GamePuzzle: 'GamePuzzle',
   DailyPuzzle: 'DailyPuzzle',
-  GameCompletion: 'GameCompletion'
+  GameCompletion: 'GameCompletion',
+  PasswordResetToken: 'PasswordResetToken',
+  UserBadge: 'UserBadge'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -83,6 +85,7 @@ export const UserScalarFieldEnum = {
   passwordHash: 'passwordHash',
   isAnonymous: 'isAnonymous',
   deviceId: 'deviceId',
+  deletedAt: 'deletedAt',
   createdAt: 'createdAt',
   updatedAt: 'updatedAt'
 } as const
@@ -172,6 +175,30 @@ export const GameCompletionScalarFieldEnum = {
 } as const
 
 export type GameCompletionScalarFieldEnum = (typeof GameCompletionScalarFieldEnum)[keyof typeof GameCompletionScalarFieldEnum]
+
+
+export const PasswordResetTokenScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  token: 'token',
+  expiresAt: 'expiresAt',
+  usedAt: 'usedAt',
+  createdAt: 'createdAt'
+} as const
+
+export type PasswordResetTokenScalarFieldEnum = (typeof PasswordResetTokenScalarFieldEnum)[keyof typeof PasswordResetTokenScalarFieldEnum]
+
+
+export const UserBadgeScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  badgeType: 'badgeType',
+  gameType: 'gameType',
+  awardedAt: 'awardedAt',
+  expiresAt: 'expiresAt'
+} as const
+
+export type UserBadgeScalarFieldEnum = (typeof UserBadgeScalarFieldEnum)[keyof typeof UserBadgeScalarFieldEnum]
 
 
 export const SortOrder = {

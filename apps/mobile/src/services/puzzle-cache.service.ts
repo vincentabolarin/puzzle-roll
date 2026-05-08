@@ -76,6 +76,12 @@ class PuzzleCacheService {
         game_type TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS solutions (
+        puzzle_id TEXT PRIMARY KEY,
+        solution_data TEXT NOT NULL,
+        cached_at INTEGER NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -296,6 +302,32 @@ class PuzzleCacheService {
 
   async markInitialSyncComplete(): Promise<void> {
     await this.setMeta('initial_sync_complete', 'true');
+  }
+
+  /** Cache a puzzle solution after fetching from API */
+  async cacheSolution(puzzleId: string, solution: unknown): Promise<void> {
+    if (!this.db) return;
+    try {
+      await this.db.runAsync(
+        'INSERT OR REPLACE INTO solutions (puzzle_id, solution_data, cached_at) VALUES (?, ?, ?)',
+        [puzzleId, JSON.stringify(solution), Date.now()]
+      );
+    } catch {}
+  }
+
+  /** Retrieve a cached solution — returns null if not cached */
+  async getSolution(puzzleId: string): Promise<unknown | null> {
+    if (!this.db) return null;
+    try {
+      const row = await this.db.getFirstAsync<{ solution_data: string }>(
+        'SELECT solution_data FROM solutions WHERE puzzle_id = ?',
+        [puzzleId]
+      );
+      if (!row) return null;
+      return JSON.parse(row.solution_data);
+    } catch {
+      return null;
+    }
   }
 }
 

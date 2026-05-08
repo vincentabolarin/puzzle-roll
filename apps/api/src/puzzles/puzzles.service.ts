@@ -92,7 +92,13 @@ export class PuzzlesService {
     return puzzle;
   }
 
-  async getPuzzleSolution(id: string) {
+  async getPuzzleSolution(id: string, userId: string) {
+    // Require JWT (already enforced at controller) — the userId param is intentionally
+    // not used for a hard block because:
+    //   1. The client only calls this endpoint when a hint is requested (before completion)
+    //   2. After completion the user legitimately wants the solution to review
+    // The JWT requirement alone prevents unauthenticated scraping.
+    // A future improvement: block if hintsUsed === 0 AND not completed.
     const puzzle = await this.prisma.gamePuzzle.findUnique({
       where: { id },
       select: { id: true, solution: true },

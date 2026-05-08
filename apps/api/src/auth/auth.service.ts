@@ -18,6 +18,7 @@ import {
 } from './auth.dto';
 import { JwtPayload } from '../common/decorators/current-user.decorator';
 import { PrismaService } from '../common/prisma/prisma.service';
+import crypto from 'node:crypto';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -141,4 +142,60 @@ export class AuthService {
 
     return { ...tokens, userId: updated.id, isAnonymous: false };
   }
+
+  // ─── Password reset ──────────────────────────────────────────────────────
+
+  async requestPasswordReset(email: string): Promise<{ resetUrl: string } | null> {
+    // Always return null for unknown emails — prevents enumeration
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.isAnonymous) return null;
+
+    await this.prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.prisma.passwordResetToken.create({
+      data: { userId: user.id, token, expiresAt },
+    });
+
+    const appUrl = this.configService.get('APP_URL', 'https://puzzleroll.com');
+    const resetUrl = `${appUrl}/reset-password?token=${token}`;
+    return { resetUrl };
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const record = await this.prisma.passwordResetToken.findUnique({ where: { token } });
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new UnauthorizedException('Invalid or expired reset token');
+    }
+    if (newPassword.length < 8) throw new BadRequestException('Password must be at least 8 characters');
+
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+      this.prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+    ]);
+  }
+
+  // ─── Account deletion ────────────────────────────────────────────────────
+
+  async deleteAccount(userId: string): Promise<void> {
+    // Soft-delete: anonymise PII, retain aggregated stats for leaderboard integrity
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          email: null,
+          passwordHash: null,
+          username: null,
+          deviceId: null,
+          deletedAt: new Date(),
+        },
+      }),
+      this.prisma.pushToken.deleteMany({ where: { userId } }),
+      this.prisma.passwordResetToken.deleteMany({ where: { userId } }),
+    ]);
+  }
+
 }
