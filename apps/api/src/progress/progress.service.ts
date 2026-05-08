@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { CompleteGameDto, SyncProgressDto } from './progress.dto';
 import { UsersService } from '../users/users.service';
 import { GameType } from '@puzzle-roll/shared';
@@ -12,6 +12,19 @@ export class ProgressService {
     // Verify puzzle exists
     const puzzle = await this.prisma.gamePuzzle.findUnique({ where: { id: dto.puzzleId } });
     if (!puzzle) throw new NotFoundException(`Puzzle ${dto.puzzleId} not found`);
+
+
+    // Server-side validation for daily completions
+    if (dto.isDaily) {
+      if (dto.elapsedSeconds < 1) {
+        throw new BadRequestException('Elapsed time is not plausible');
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const submittedDate = dto.completedAt.slice(0, 10);
+      if (submittedDate !== today) {
+        throw new BadRequestException('Daily puzzle submission date mismatch');
+      }
+    }
 
     // Idempotent — if already completed, return existing
     const existing = await this.prisma.gameCompletion.findUnique({

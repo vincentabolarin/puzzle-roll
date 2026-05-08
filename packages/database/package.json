@@ -11,7 +11,8 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "ts-node --project tsconfig.json seed/index.ts",
     "db:studio": "prisma studio --browser none",
-    "db:reset": "prisma migrate reset --force"
+    "db:reset": "prisma migrate reset --force",
+    "db:add-puzzles": "ts-node --project tsconfig.json seed/add-puzzles.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.3.0",

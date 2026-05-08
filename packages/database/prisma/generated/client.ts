@@ -74,3 +74,13 @@ export type DailyPuzzle = Prisma.DailyPuzzleModel
  * 
  */
 export type GameCompletion = Prisma.GameCompletionModel
+/**
+ * Model PasswordResetToken
+ * 
+ */
+export type PasswordResetToken = Prisma.PasswordResetTokenModel
+/**
+ * Model UserBadge
+ * 
+ */
+export type UserBadge = Prisma.UserBadgeModel

@@ -11,6 +11,27 @@ const TAB_ITEMS = [
   { name: 'settings',    label: 'Settings', icon: '⚙️' },
 ] as const;
 
+// Shared Tabs.Screen declarations — used in both navigators so Expo Router
+// never sees undeclared screens (which causes "Too many screens" warnings).
+function TabScreens() {
+  return (
+    <>
+      {TAB_ITEMS.map((item) => (
+        <Tabs.Screen
+          key={item.name}
+          name={item.name}
+          options={{
+            title: item.label,
+            tabBarIcon: ({ focused }) => (
+              <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{item.icon}</Text>
+            ),
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
 function SidebarNavigator() {
   const pathname = usePathname();
   const t = useAppTheme();
@@ -48,7 +69,10 @@ function SidebarNavigator() {
         })}
       </View>
       <View style={{ flex: 1 }}>
-        <Tabs screenOptions={{ headerShown: false, tabBarStyle: { display: 'none' } }} />
+        {/* Explicit Tabs.Screen declarations prevent "Too many screens" warning */}
+        <Tabs screenOptions={{ headerShown: false, tabBarStyle: { display: 'none' } }}>
+          <TabScreens />
+        </Tabs>
       </View>
     </View>
   );
@@ -73,18 +97,7 @@ function BottomTabBar() {
         tabBarLabelStyle: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 10 },
       }}
     >
-      {TAB_ITEMS.map((item) => (
-        <Tabs.Screen
-          key={item.name}
-          name={item.name}
-          options={{
-            title: item.label,
-            tabBarIcon: ({ focused }) => (
-              <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{item.icon}</Text>
-            ),
-          }}
-        />
-      ))}
+      <TabScreens />
     </Tabs>
   );
 }

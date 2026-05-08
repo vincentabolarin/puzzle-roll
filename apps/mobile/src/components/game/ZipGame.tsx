@@ -216,13 +216,31 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, 
 
   const handleHint = useCallback(async () => {
     if (!gameState || isPaused) return;
+    const sol = await loadSolution();
+    if (!sol || sol.path.length === 0) return;
+
+    // Find the longest prefix of the current path matching the solution.
+    // This handles off-track paths: trim to the common prefix, then step forward.
+    let commonLen = 0;
+    for (let i = 0; i < Math.min(path.length, sol.path.length); i++) {
+      if (path[i].row === sol.path[i].row && path[i].col === sol.path[i].col) {
+        commonLen = i + 1;
+      } else {
+        break;
+      }
+    }
+
+    if (commonLen >= sol.path.length) return; // already on complete correct path
+
+    // Consume hint AFTER confirming there is something to do
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
-    const sol = await loadSolution(); if (!sol) return;
-    const nextIdx = path.length; if (nextIdx >= sol.path.length) return;
-    const next = sol.path[nextIdx];
+
     lightImpact(); playSound('hint');
-    const { newPath } = tryExtendSync(next.row, next.col, path);
-    await commitPath(newPath);
+
+    // Trim to common prefix then add next correct cell
+    const stepped = [...sol.path.slice(0, commonLen), sol.path[commonLen]];
+    pathRef.current = stepped;
+    await commitPath(stepped);
   }, [gameState, isPaused, path, useHint, showRewardedAd, loadSolution, lightImpact]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;

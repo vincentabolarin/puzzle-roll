@@ -174,4 +174,25 @@ export class NotificationsService {
 
     this.logger.log('Enqueued streak nudges');
   }
+
+  async enqueueStreakMilestones(userId: string, gameType: string, streak: number, pushToken: string): Promise<void> {
+    const milestones = [7, 30, 100];
+    if (!milestones.includes(streak)) return;
+    if (!Expo.isExpoPushToken(pushToken)) return;
+
+    await this.notificationQueue.add(
+      'streak-milestone',
+      { userId, pushToken, streakDays: streak, gameType } satisfies { userId: string; pushToken: string; streakDays: number; gameType: string },
+      { delay: 0, attempts: 2 }
+    );
+  }
+
+  async enqueueWeeklyChampionNotification(userId: string, pushToken: string, gameType: string): Promise<void> {
+    if (!Expo.isExpoPushToken(pushToken)) return;
+    await this.notificationQueue.add(
+      'weekly-champion',
+      { userId, pushToken, gameType },
+      { delay: 0, attempts: 2 }
+    );
+  }
 }

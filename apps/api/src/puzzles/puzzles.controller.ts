@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PuzzlesService } from './puzzles.service';
 import { GetPuzzlesQueryDto } from './puzzles.dto';
+import { CurrentUser, JwtPayload } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { GameType } from '@puzzle-roll/shared';
@@ -35,8 +36,11 @@ export class PuzzlesController {
   }
 
   @Get('id/:id/solution')
-  @ApiOperation({ summary: 'Get puzzle solution (used by client after completion)' })
-  async getPuzzleSolution(@Param('id') id: string) {
-    return this.puzzlesService.getPuzzleSolution(id);
+  @ApiOperation({ summary: 'Get puzzle solution — JWT required' })
+  async getPuzzleSolution(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.puzzlesService.getPuzzleSolution(id, user.sub);
   }
 }

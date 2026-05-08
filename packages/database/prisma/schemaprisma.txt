@@ -39,7 +39,6 @@ model User {
   passwordHash String?
   isAnonymous  Boolean  @default(true)
   deviceId     String?  @unique
-  deletedAt    DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -51,8 +50,6 @@ model User {
   @@index([email])
   @@index([deviceId])
   @@index([username])
-  passwordResetTokens PasswordResetToken[]
-  userBadges UserBadge[]
 }
 
 // ─── User Settings ────────────────────────────────────────────────────────────
@@ -169,32 +166,4 @@ model GameCompletion {
   @@index([dailyPuzzleId])
   @@index([gameType, completedAt])
   @@index([isDaily, gameType, completedAt])
-}
-
-model PasswordResetToken {
-  id        String    @id @default(cuid())
-  userId    String
-  token     String    @unique
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([token])
-}
-
-model UserBadge {
-  id         String   @id @default(cuid())
-  userId     String
-  badgeType  String
-  gameType   String?
-  awardedAt  DateTime @default(now())
-  expiresAt  DateTime?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, badgeType, gameType])
-  @@index([userId])
 }

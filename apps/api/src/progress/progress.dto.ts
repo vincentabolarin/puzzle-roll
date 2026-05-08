@@ -8,6 +8,7 @@ import {
   Min,
   ValidateNested,
   IsArray,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -38,6 +39,7 @@ export class CompleteGameDto {
   @ApiProperty({ description: 'Elapsed time in seconds' })
   @IsInt()
   @Min(1)
+  @Max(86400) // 24h cap — catches impossible submissions
   elapsedSeconds!: number;
 
   @ApiProperty()
