@@ -26,4 +26,11 @@ export class LeaderboardController {
   async getAllTimeLeaderboard(@Param('gameType') gameType: GameType) {
     return this.leaderboardService.getAllTimeLeaderboard(gameType);
   }
+
+  @Get(':gameType/weekly')
+  @ApiOperation({ summary: 'Get weekly leaderboard — top players over the last 7 days' })
+  async getWeeklyLeaderboard(@Param('gameType') gameType: GameType) {
+    return this.leaderboardService.getWeeklyLeaderboard(gameType);
+  }
+
 }

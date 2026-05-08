@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Delete, Body, UseGuards, Param, Query } from '@nestjs/common';
+import { Controller, Get, Patch, Delete, HttpCode, HttpStatus, Body, UseGuards, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { UpdateNotificationsDto, UpdateSettingsDto, UpdateUsernameDto } from './users.dto';
@@ -68,4 +68,13 @@ export class UsersController {
   async getUserStats(@Param('userId') userId: string) {
     return this.usersService.getStats(userId);
   }
+
+  @Delete('me')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete own account (soft-delete)' })
+  async deleteMe(@CurrentUser() user: JwtPayload): Promise<{ message: string }> {
+    await this.usersService.deleteUser(user.sub);
+    return { message: 'Account deleted.' };
+  }
+
 }

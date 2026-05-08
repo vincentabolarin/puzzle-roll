@@ -10,6 +10,7 @@ export default function LoginScreen() {
   const isDark = t.background !== '#f9fafb';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,16 +61,36 @@ export default function LoginScreen() {
               autoCorrect={false}
               accessibilityLabel="Email address"
             />
-            <TextInput
-              style={[S.input, { backgroundColor: t.surface, color: t.textPrimary, borderColor: error ? '#f87171' : t.border }]}
-              placeholder="Password"
-              placeholderTextColor={t.textMuted}
-              value={password}
-              onChangeText={(v) => { setPassword(v); setError(null); }}
-              secureTextEntry
-              accessibilityLabel="Password"
-            />
+            {/* Password field with eye icon */}
+            <View style={[S.passwordRow, { backgroundColor: t.surface, borderColor: error ? '#f87171' : t.border }]}>
+              <TextInput
+                style={[S.passwordInput, { color: t.textPrimary }]}
+                placeholder="Password"
+                placeholderTextColor={t.textMuted}
+                value={password}
+                onChangeText={(v) => { setPassword(v); setError(null); }}
+                secureTextEntry={!showPassword}
+                accessibilityLabel="Password"
+              />
+              <TouchableOpacity
+                onPress={() => setShowPassword(v => !v)}
+                style={S.eyeBtn}
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+              >
+                <Text style={{ fontSize: 18 }}>{showPassword ? '🙈' : '👁️'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
+
+          <TouchableOpacity
+            onPress={() => router.push('/(auth)/forgot-password' as never)}
+            style={{ marginBottom: 20, alignSelf: 'flex-end' }}
+            accessibilityLabel="Forgot password"
+          >
+            <Text style={{ color: '#6366f1', fontFamily: 'SpaceGrotesk-Regular', fontSize: 13 }}>
+              Forgot password?
+            </Text>
+          </TouchableOpacity>
 
           <TouchableOpacity
             onPress={handleLogin}
@@ -100,8 +121,11 @@ const S = StyleSheet.create({
   title: { fontFamily: 'SpaceGrotesk-Bold', fontSize: 28, marginBottom: 6 },
   subtitle: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 13, marginBottom: 24 },
   errorBox: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 16 },
-  fields: { gap: 10, marginBottom: 20 },
+  fields: { gap: 10, marginBottom: 8 },
   input: { borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13, fontFamily: 'SpaceGrotesk-Regular', fontSize: 14, borderWidth: 1 },
+  passwordRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, borderWidth: 1 },
+  passwordInput: { flex: 1, paddingHorizontal: 16, paddingVertical: 13, fontFamily: 'SpaceGrotesk-Regular', fontSize: 14 },
+  eyeBtn: { padding: 12 },
   primaryBtn: { backgroundColor: '#6366f1', borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 16 },
   primaryBtnText: { color: '#fff', fontFamily: 'SpaceGrotesk-Bold', fontSize: 15 },
 });

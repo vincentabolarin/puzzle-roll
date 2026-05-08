@@ -1,7 +1,8 @@
 import '../global.css';
-import { useEffect, useState, createContext, useContext } from 'react';
-import { View, Text, useColorScheme } from 'react-native';
-import { Stack } from 'expo-router';
+import { useEffect, useState, useRef, createContext, useContext } from 'react';
+import { View, Text, useColorScheme, ColorSchemeName } from 'react-native';
+import { Stack, router } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -16,7 +17,8 @@ import { useNetworkStatus } from '../src/hooks/useNetworkStatus';
 import { authService } from '../src/services/auth.service';
 import { hydratePuzzleProgress } from '../src/stores/puzzle-progress.store';
 import { usePushNotifications } from '../src/hooks/usePushNotifications';
-import { validateEnv } from '@/lib/env';
+import { missingVars } from '../src/lib/env';
+import { hasSeenOnboarding } from './onboarding';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -33,12 +35,11 @@ export function useTheme(): ResolvedTheme {
 // ─── Root layout ──────────────────────────────────────────────────────────────
 
 function RootLayout() {
-  const envCheck = validateEnv();
-
-  const { hydrateFromStorage: hydrateAuth, user } = useAuthStore();
+  const { hydrateFromStorage: hydrateAuth, isHydrated: authHydrated, user } = useAuthStore();
   const { hydrateFromStorage: hydrateSettings, theme } = useSettingsStore();
   const { isConnected } = useNetworkStatus();
   const { registerForPushNotifications } = usePushNotifications();
+  const [onboardingDone, setOnboardingDone] = useState(true);
   const systemColorScheme = useColorScheme();
 
   const [dbReady, setDbReady] = useState(false);
@@ -52,44 +53,37 @@ function RootLayout() {
     'JetBrainsMono-Regular': require('../assets/fonts/JetBrainsMono-Regular.ttf'),
   });
 
-  // Log env validation errors for debugging
-  useEffect(() => {
-    if (!envCheck.valid) {
-      console.error('[ENV VALIDATION FAILED]', envCheck.errors);
-    }
-  }, [envCheck.valid]);
-
   // Step 1 — Init DB and hydrate settings + progress store
   useEffect(() => {
-    if (!envCheck.valid) return;
-
     async function init() {
       await puzzleCache.init();
       await hydrateSettings();
       await hydratePuzzleProgress();
-
       const hasSynced = await puzzleCache.hasInitialSync();
       setNeedsInitialSync(!hasSynced);
+      const seen = await hasSeenOnboarding();
+      setOnboardingDone(seen);
       setDbReady(true);
     }
-
     init();
-  }, [envCheck.valid]);
+  }, []);
 
-  // Step 2 — Auth bootstrap
+  // Step 2 — Auth bootstrap (runs after db is ready)
+  // Hydrate stored tokens. If no user found (first install or cleared storage),
+  // create an anonymous session automatically so every API call has a valid JWT.
   useEffect(() => {
-    if (!envCheck.valid || !dbReady) return;
+    if (!dbReady) return;
 
     async function bootstrapAuth() {
       await hydrateAuth();
-
       const { user: currentUser } = useAuthStore.getState();
 
       if (!currentUser) {
+        // No stored session — create anonymous session
         try {
           await authService.createAnonymousSession();
         } catch {
-          // Non-fatal: app can still run offline
+          // Non-fatal: app can still run offline, API calls will fail gracefully
         }
       }
 
@@ -97,97 +91,80 @@ function RootLayout() {
     }
 
     bootstrapAuth();
-  }, [envCheck.valid, dbReady]);
+  }, [dbReady]);
 
-  // Register push notifications for authenticated users
+  // Push notifications: register whenever a real user is present
   useEffect(() => {
     if (authBootstrapped && user && !user.isAnonymous) {
       registerForPushNotifications();
     }
   }, [authBootstrapped, user?.id]);
 
-  // Flush offline queue when back online
+  // Deep link handler: notification taps navigate to the relevant screen
   useEffect(() => {
-    if (!envCheck.valid) return;
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as {
+        screen?: string; gameType?: string;
+      };
+      if (data.screen === 'daily' && data.gameType) {
+        router.push(`/game/${data.gameType}/daily` as never);
+      } else if (data.screen === 'leaderboard') {
+        router.push('/(tabs)/leaderboard' as never);
+      } else if (data.screen === 'profile') {
+        router.push('/(tabs)/profile' as never);
+      } else if (data.screen === 'home') {
+        router.push('/(tabs)/' as never);
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
+  // Step 3 — Online sync
+  useEffect(() => {
     const { user: currentUser } = useAuthStore.getState();
-
     if (isConnected && currentUser) {
       syncService.flushOfflineQueue();
     }
-  }, [envCheck.valid, isConnected, user]);
+  }, [isConnected, user]);
 
-  // Fetch daily puzzles when online
   useEffect(() => {
-    if (!envCheck.valid) return;
-
     const { user: currentUser } = useAuthStore.getState();
-
     if (isConnected && currentUser && dbReady) {
       syncService.fetchAndCacheDailyPuzzles();
     }
-  }, [envCheck.valid, isConnected, user, dbReady]);
+  }, [isConnected, user, dbReady]);
 
   const isReady = fontsLoaded && authBootstrapped && dbReady;
 
   useEffect(() => {
     if (isReady) {
       SplashScreen.hideAsync();
+      if (!onboardingDone) {
+        setTimeout(() => router.replace('/onboarding' as never), 100);
+      }
     }
-  }, [isReady]);
+  }, [isReady, onboardingDone]);
 
-  // Resolve theme
+  // Resolve theme: 'system' defers to device setting
   const resolvedTheme: ResolvedTheme =
     theme === 'system'
-      ? systemColorScheme === 'light'
-        ? 'light'
-        : 'dark'
+      ? (systemColorScheme === 'light' ? 'light' : 'dark')
       : theme;
 
-  // Show configuration error instead of crashing
-  if (!envCheck.valid) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          paddingHorizontal: 32,
-          backgroundColor: '#060818',
-        }}
-      >
-        <Text
-          style={{
-            fontFamily: 'SpaceGrotesk-Bold',
-            fontSize: 22,
-            color: '#f9fafb',
-            marginBottom: 16,
-            textAlign: 'center',
-          }}
-        >
-          Configuration Error
-        </Text>
+  if (!isReady) return null;
 
-        {envCheck.errors.map((error) => (
-          <Text
-            key={error}
-            style={{
-              fontFamily: 'SpaceGrotesk-Regular',
-              fontSize: 15,
-              color: '#ef4444',
-              textAlign: 'center',
-              lineHeight: 22,
-              marginBottom: 8,
-            }}
-          >
-            {error}
-          </Text>
-        ))}
+  if (missingVars.length > 0) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#060818', padding: 32 }}>
+        <Text style={{ fontFamily: 'SpaceGrotesk-Bold', fontSize: 18, color: '#ef4444', textAlign: 'center', marginBottom: 12 }}>
+          Configuration error
+        </Text>
+        <Text style={{ fontFamily: 'SpaceGrotesk-Regular', fontSize: 13, color: '#9ca3af', textAlign: 'center', lineHeight: 20 }}>
+          Missing required environment variables:{' '}{missingVars.join(', ')}{' '}Add these to your EAS build profile or .env file and rebuild.
+        </Text>
       </View>
     );
   }
-
-  if (!isReady) return null;
 
   return (
     <ThemeContext.Provider value={resolvedTheme}>
@@ -195,60 +172,31 @@ function RootLayout() {
         <SafeAreaProvider>
           <QueryClientProvider client={queryClient}>
             {needsInitialSync && !isConnected ? (
-              <View
-                style={{
-                  flex: 1,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor:
-                    resolvedTheme === 'dark' ? '#060818' : '#f9fafb',
-                  paddingHorizontal: 32,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: 'SpaceGrotesk-Bold',
-                    fontSize: 20,
-                    textAlign: 'center',
-                    marginBottom: 12,
-                    color:
-                      resolvedTheme === 'dark' ? '#f9fafb' : '#111827',
-                  }}
-                >
+              <View style={{
+                flex: 1, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: resolvedTheme === 'dark' ? '#060818' : '#f9fafb',
+                paddingHorizontal: 32,
+              }}>
+                <Text style={{
+                  fontFamily: 'SpaceGrotesk-Bold', fontSize: 20, textAlign: 'center', marginBottom: 12,
+                  color: resolvedTheme === 'dark' ? '#f9fafb' : '#111827',
+                }}>
                   One-time setup needed
                 </Text>
-
-                <Text
-                  style={{
-                    fontFamily: 'SpaceGrotesk-Regular',
-                    fontSize: 15,
-                    textAlign: 'center',
-                    lineHeight: 22,
-                    color:
-                      resolvedTheme === 'dark' ? '#9ca3af' : '#6b7280',
-                  }}
-                >
-                  Connect to the internet once to download your puzzles. After
-                  that, you can play offline anytime.
+                <Text style={{
+                  fontFamily: 'SpaceGrotesk-Regular', fontSize: 15, textAlign: 'center', lineHeight: 22,
+                  color: resolvedTheme === 'dark' ? '#9ca3af' : '#6b7280',
+                }}>
+                  Connect to the internet once to download your puzzles. After that, you can play offline anytime.
                 </Text>
               </View>
             ) : (
               <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen
-                  name="(tabs)"
-                  options={{ headerShown: false }}
-                />
-                <Stack.Screen
-                  name="(auth)"
-                  options={{
-                    headerShown: false,
-                    presentation: 'modal',
-                  }}
-                />
-                <Stack.Screen
-                  name="game"
-                  options={{ headerShown: false }}
-                />
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="(auth)" options={{ headerShown: false, presentation: 'modal' }} />
+                <Stack.Screen name="game" options={{ headerShown: false }} />
+                <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+                <Stack.Screen name="(legal)" options={{ headerShown: false }} />
               </Stack>
             )}
           </QueryClientProvider>

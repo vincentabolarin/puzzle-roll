@@ -1,7 +1,8 @@
 import { View, Text, ScrollView, TouchableOpacity, TextInput, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { apiClient } from '../../src/lib/api-client';
@@ -38,7 +39,13 @@ export default function ProfileScreen() {
 
   // Reset modal state whenever user changes (prevents stale modal after logout)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  useEffect(() => { setShowLogoutConfirm(false); }, [user?.id]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  useEffect(() => { setShowLogoutConfirm(false); setShowDeleteConfirm(false); }, [user?.id]);
+
+  // Refetch stats every time the profile tab gains focus
+  useFocusEffect(useCallback(() => {
+    if (user) refetchStats();
+  }, [user?.id]));
 
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeEmail, setUpgradeEmail] = useState('');
@@ -98,18 +105,9 @@ export default function ProfileScreen() {
       setEditingUsername(false);
       await refetchProfile();
     } catch (err) {
-      const isConflict = (err instanceof Error && (
-        err.message.toLowerCase().includes('conflict') ||
-        err.message.toLowerCase().includes('taken') ||
-        ('statusCode' in err && (err as { statusCode: number }).statusCode === 409)
-      ));
-      if (isConflict) {
-        setUsernameError('That username is already taken. Try another.');
-      } else if (err instanceof Error && err.message.includes('404')) {
-        setUsernameError('Username service unavailable. Please try again later.');
-      } else {
-        setUsernameError('Could not save username. Please try again.');
-      }
+      const message = err instanceof Error ? err.message : 'Could not save username.';
+      // 404 means username endpoint not found — show meaningful error
+      setUsernameError(message.includes('404') ? 'Username service unavailable. Please try again later.' : message);
     } finally { setSavingUsername(false); }
   };
 
@@ -204,7 +202,7 @@ export default function ProfileScreen() {
         )}
         {user?.isAnonymous && showUpgrade && (
           <View style={[S.card, { backgroundColor: t.surface, borderColor: t.borderSubtle, padding: 20, marginBottom: 16 }]}>
-            <Text style={[S.sectionTitle, { color: t.textPrimary, marginBottom: 12 }]}>Create account</Text>
+            <Text style={[S.sectionTitle, { color: t.textPrimary, marginBottom: 12 }]}>Save your progress</Text>
             {upgradeError && <Text style={[S.errorText, { marginBottom: 8 }]}>{upgradeError}</Text>}
             <TextInput style={[S.input, { backgroundColor: t.surface2, color: t.textPrimary, borderColor: t.border }]} placeholder="Email" placeholderTextColor={t.textMuted} value={upgradeEmail} onChangeText={setUpgradeEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
             <TextInput style={[S.input, { backgroundColor: t.surface2, color: t.textPrimary, borderColor: t.border }]} placeholder="Password (min 8 characters)" placeholderTextColor={t.textMuted} value={upgradePassword} onChangeText={setUpgradePassword} secureTextEntry />
@@ -267,9 +265,14 @@ export default function ProfileScreen() {
 
         {/* Logout */}
         {!user?.isAnonymous && user != null && (
-          <TouchableOpacity style={[S.dangerBtn, { backgroundColor: t.surface, borderColor: t.border }]} onPress={() => setShowLogoutConfirm(true)}>
-            <Text style={S.dangerBtnText}>Log out</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity style={[S.dangerBtn, { backgroundColor: t.surface, borderColor: t.border }]} onPress={() => setShowLogoutConfirm(true)}>
+              <Text style={S.dangerBtnText}>Log out</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[S.dangerBtn, { backgroundColor: t.surface, borderColor: '#ef4444', marginTop: 8 }]} onPress={() => setShowDeleteConfirm(true)}>
+              <Text style={[S.dangerBtnText, { color: '#ef4444' }]}>Delete account</Text>
+            </TouchableOpacity>
+          </>
         )}
       </ScrollView>
 
@@ -281,6 +284,22 @@ export default function ProfileScreen() {
         confirmDanger
         onConfirm={handleLogout}
         onCancel={() => setShowLogoutConfirm(false)}
+      />
+      <ConfirmModal
+        visible={showDeleteConfirm}
+        title="Delete account?"
+        message="Your personal information (email, username, password) will be permanently removed. Your game stats remain anonymised. This cannot be undone."
+        confirmLabel="Delete permanently"
+        confirmDanger
+        onConfirm={async () => {
+          setShowDeleteConfirm(false);
+          try {
+            await apiClient.delete('/auth/account');
+            await authService.logout();
+            router.replace('/');
+          } catch {}
+        }}
+        onCancel={() => setShowDeleteConfirm(false)}
       />
     </SafeAreaView>
   );

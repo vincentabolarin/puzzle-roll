@@ -35,7 +35,7 @@ export class LeaderboardService {
     const entries = completions.map((c, index) => ({
       rank: index + 1,
       userId: c.userId,
-      username: c.user.email?.split('@')[0] ?? `Player_${c.userId.slice(0, 6)}`,
+      username: (c.user as any).username ?? c.user.email?.split('@')[0] ?? `Player_${c.userId.slice(0, 6)}`,
       elapsedSeconds: c.elapsedSeconds,
       hintsUsed: c.hintsUsed,
       completedAt: c.completedAt.toISOString(),
@@ -71,9 +71,7 @@ export class LeaderboardService {
           userEntry: {
             rank: rank + 1,
             userId: userCompletion.userId,
-            username:
-              userCompletion.user.email?.split('@')[0] ??
-              `Player_${userCompletion.userId.slice(0, 6)}`,
+            username: (userCompletion.user as any).username ?? userCompletion.user.email?.split('@')[0] ?? `Player_${userCompletion.userId.slice(0, 6)}`,
             elapsedSeconds: userCompletion.elapsedSeconds,
             hintsUsed: userCompletion.hintsUsed,
             completedAt: userCompletion.completedAt.toISOString(),
@@ -116,4 +114,58 @@ export class LeaderboardService {
       gamesCompleted: r._count.id,
     }));
   }
+
+  /** Returns the leaderboard for the current Mon–Sun ISO week (UTC) */
+  async getWeeklyLeaderboard(gameType: GameType, limit = 100) {
+    // Find the most recent Monday at 00:00:00 UTC
+    const now = new Date();
+    const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon … 6=Sat
+    const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const weekStart = new Date(Date.UTC(
+      now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysSinceMonday
+    ));
+
+    const completions = await this.prisma.gameCompletion.findMany({
+      where: { gameType: gameType as GameType, isDaily: true, completedAt: { gte: weekStart } },
+      orderBy: [{ elapsedSeconds: 'asc' }, { hintsUsed: 'asc' }],
+      include: { user: { select: { id: true, email: true, username: true } } },
+    });
+
+    // Best time per user this week
+    const bestPerUser = new Map<string, typeof completions[0]>();
+    for (const c of completions) {
+      const existing = bestPerUser.get(c.userId);
+      if (!existing || c.elapsedSeconds < existing.elapsedSeconds) bestPerUser.set(c.userId, c);
+    }
+
+    const sorted = Array.from(bestPerUser.values())
+      .sort((a, b) => a.elapsedSeconds - b.elapsedSeconds || a.hintsUsed - b.hintsUsed)
+      .slice(0, limit);
+
+    return sorted.map((c, i) => ({
+      rank: i + 1,
+      userId: c.userId,
+      username: c.user.username ?? c.user.email?.split('@')[0] ?? `Player_${c.userId.slice(0, 6)}`,
+      elapsedSeconds: c.elapsedSeconds,
+      hintsUsed: c.hintsUsed,
+    }));
+  }
+
+  /** Award weekly champion badge — called by cron every Monday midnight UTC */
+  async awardWeeklyChampionBadges(): Promise<void> {
+    const gameTypes: GameType[] = ['sudoku','queens','zip','tango','nonogram','minesweeper','kakuro','light_up','futoshiki','hitori'] as GameType[];
+    const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // badge lasts 7 days
+
+    for (const gt of gameTypes) {
+      const weekly = await this.getWeeklyLeaderboard(gt, 1);
+      if (weekly.length === 0) continue;
+      const winner = weekly[0];
+      await this.prisma.userBadge.upsert({
+        where: { userId_badgeType_gameType: { userId: winner.userId, badgeType: 'weekly_champion', gameType: gt } },
+        create: { userId: winner.userId, badgeType: 'weekly_champion', gameType: gt, expiresAt: expiry },
+        update: { awardedAt: new Date(), expiresAt: expiry },
+      });
+    }
+  }
+
 }

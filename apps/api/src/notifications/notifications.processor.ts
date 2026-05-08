@@ -81,4 +81,32 @@ export class NotificationsProcessor {
     await this.notificationsService.sendPushNotifications([message]);
     this.logger.debug(`Sent streak nudge to user ${job.data.userId}`);
   }
+
+  @Process('streak-milestone')
+  async handleStreakMilestone(job: Job<{ userId: string; pushToken: string; streakDays: number; gameType: string }>): Promise<void> {
+    const { pushToken, streakDays, gameType } = job.data;
+    if (!Expo.isExpoPushToken(pushToken)) return;
+    const emoji = streakDays >= 100 ? '🏆' : streakDays >= 30 ? '🥇' : '🔥';
+    await this.notificationsService.sendPushNotifications([{
+      to: pushToken,
+      sound: 'default',
+      title: `${emoji} ${streakDays}-day streak!`,
+      body: `Incredible! You've kept your ${gameType} streak alive for ${streakDays} days in a row.`,
+      data: { screen: 'profile', url: 'puzzleroll://profile' },
+    }]);
+  }
+
+  @Process('weekly-champion')
+  async handleWeeklyChampion(job: Job<{ userId: string; pushToken: string; gameType: string }>): Promise<void> {
+    const { pushToken, gameType } = job.data;
+    if (!Expo.isExpoPushToken(pushToken)) return;
+    await this.notificationsService.sendPushNotifications([{
+      to: pushToken,
+      sound: 'default',
+      title: '🏆 Weekly Champion!',
+      body: `You topped this week's ${gameType} leaderboard. Your champion badge is live!`,
+      data: { screen: 'leaderboard', gameType, url: `puzzleroll://leaderboard/${gameType}` },
+    }]);
+  }
+
 }
