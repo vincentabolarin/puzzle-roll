@@ -11,27 +11,6 @@ const TAB_ITEMS = [
   { name: 'settings',    label: 'Settings', icon: '⚙️' },
 ] as const;
 
-// Shared Tabs.Screen declarations — used in both navigators so Expo Router
-// never sees undeclared screens (which causes "Too many screens" warnings).
-function TabScreens() {
-  return (
-    <>
-      {TAB_ITEMS.map((item) => (
-        <Tabs.Screen
-          key={item.name}
-          name={item.name}
-          options={{
-            title: item.label,
-            tabBarIcon: ({ focused }) => (
-              <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{item.icon}</Text>
-            ),
-          }}
-        />
-      ))}
-    </>
-  );
-}
-
 function SidebarNavigator() {
   const pathname = usePathname();
   const t = useAppTheme();
@@ -69,9 +48,11 @@ function SidebarNavigator() {
         })}
       </View>
       <View style={{ flex: 1 }}>
-        {/* Explicit Tabs.Screen declarations prevent "Too many screens" warning */}
         <Tabs screenOptions={{ headerShown: false, tabBarStyle: { display: 'none' } }}>
-          <TabScreens />
+          <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ focused }) => <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>🎮</Text> }} />
+          <Tabs.Screen name="leaderboard" options={{ title: 'Ranks', tabBarIcon: ({ focused }) => <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>🏆</Text> }} />
+          <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ focused }) => <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>👤</Text> }} />
+          <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ focused }) => <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>⚙️</Text> }} />
         </Tabs>
       </View>
     </View>
@@ -97,7 +78,10 @@ function BottomTabBar() {
         tabBarLabelStyle: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 10 },
       }}
     >
-      <TabScreens />
+      <Tabs.Screen name="index" options={{ title: 'Home', tabBarIcon: ({ focused }) => <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>🎮</Text> }} />
+      <Tabs.Screen name="leaderboard" options={{ title: 'Ranks', tabBarIcon: ({ focused }) => <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>🏆</Text> }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile', tabBarIcon: ({ focused }) => <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>👤</Text> }} />
+      <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: ({ focused }) => <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>⚙️</Text> }} />
     </Tabs>
   );
 }
