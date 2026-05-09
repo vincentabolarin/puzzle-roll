@@ -1,91 +1,112 @@
 import { useEffect, useRef } from 'react';
-import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { apiClient } from '../lib/api-client';
 import { useAuthStore } from '../stores/auth.store';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    // true = show banner when the app is in the foreground
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+const IS_EXPO_GO = Constants.appOwnership === 'expo';
+
+type NotificationsModule = typeof import('expo-notifications');
+let notifCache: NotificationsModule | null = null;
+
+async function getNotifModule(): Promise<NotificationsModule | null> {
+  if (IS_EXPO_GO) return null;
+  if (notifCache) return notifCache;
+  try {
+    notifCache = await import('expo-notifications');
+    return notifCache;
+  } catch {
+    return null;
+  }
+}
 
 export function usePushNotifications() {
   const { user } = useAuthStore();
   const tokenRegistered = useRef(false);
 
-  const registerForPushNotifications = async (): Promise<void> => {
-    if (!user || user.isAnonymous) {
-      return;
-    }
+  // Set the foreground notification handler once on mount
+  useEffect(() => {
+    if (IS_EXPO_GO) return;
+    getNotifModule().then((mod) => {
+      if (!mod) return;
+      mod.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+    });
+  }, []);
 
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  const registerForPushNotifications = async (): Promise<void> => {
+    if (IS_EXPO_GO || !user || user.isAnonymous) return;
+
+    const mod = await getNotifModule();
+    if (!mod) return;
+
+    const { status: existingStatus } = await mod.getPermissionsAsync();
     let finalStatus = existingStatus;
 
     if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
+      const { status } = await mod.requestPermissionsAsync();
       finalStatus = status;
     }
 
-    if (finalStatus !== 'granted') {
-      return;
-    }
+    if (finalStatus !== 'granted') return;
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
+      await mod.setNotificationChannelAsync('default', {
         name: 'Default',
-        importance: Notifications.AndroidImportance.MAX,
+        importance: mod.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
       });
     }
 
-    try {
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const payload: Record<string, unknown> = {
-        notificationEnabled: true,
-        timezone,
-        timezoneOffsetMinutes: -(new Date().getTimezoneOffset()),
-      };
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const payload: Record<string, unknown> = {
+      notificationEnabled: true,
+      timezone,
+      timezoneOffsetMinutes: -(new Date().getTimezoneOffset()),
+    };
 
-      if (!tokenRegistered.current) {
-        // Prefer Constants (runtime app.json) over the env module so this works
-        // in both Expo Go (dev) and production builds without env file changes.
-        const projectId =
-          (Constants.expoConfig?.extra?.eas?.projectId as string | undefined) ??
-          process.env.EXPO_PUBLIC_PROJECT_ID;
+    if (!tokenRegistered.current) {
+      const projectId =
+        (Constants.expoConfig?.extra?.eas?.projectId as string | undefined) ??
+        process.env.EXPO_PUBLIC_PROJECT_ID;
 
+      if (!projectId) return;
 
-        if (!projectId) {
-          return;
-        }
-
-        const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
+      try {
+        const tokenData = await mod.getExpoPushTokenAsync({ projectId });
         payload.pushToken = tokenData.data;
         payload.platform = Platform.OS;
         tokenRegistered.current = true;
+      } catch {
+        return;
       }
+    }
 
+    try {
       await apiClient.patch('/users/me/notifications', payload);
-    } catch (err) {
+    } catch {
+      // Non-fatal
     }
   };
 
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const _data = response.notification.request.content.data as {
-        screen?: string;
-        gameType?: string;
-      };
-      // Navigation on tap is handled by deep link scheme in app.json
+    if (IS_EXPO_GO) return;
+    let cleanup: (() => void) | undefined;
+    getNotifModule().then((mod) => {
+      if (!mod) return;
+      const sub = mod.addNotificationResponseReceivedListener(() => {
+        // Navigation on tap is handled by the deep link scheme in app.json
+      });
+      cleanup = () => sub.remove();
     });
-
-    return () => subscription.remove();
+    return () => cleanup?.();
   }, []);
 
   return { registerForPushNotifications };
