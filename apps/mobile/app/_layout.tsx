@@ -1,8 +1,8 @@
 import '../global.css';
-import { useEffect, useState, useRef, createContext, useContext } from 'react';
-import { View, Text, useColorScheme, ColorSchemeName } from 'react-native';
+import { useEffect, useState, createContext, useContext } from 'react';
+import { View, Text, useColorScheme } from 'react-native';
 import { Stack, router } from 'expo-router';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -21,6 +21,8 @@ import { missingVars } from '../src/lib/env';
 import { hasSeenOnboarding } from './onboarding';
 
 SplashScreen.preventAutoHideAsync();
+
+const IS_EXPO_GO = Constants.appOwnership === 'expo';
 
 // ─── Theme context ────────────────────────────────────────────────────────────
 
@@ -68,9 +70,7 @@ function RootLayout() {
     init();
   }, []);
 
-  // Step 2 — Auth bootstrap (runs after db is ready)
-  // Hydrate stored tokens. If no user found (first install or cleared storage),
-  // create an anonymous session automatically so every API call has a valid JWT.
+  // Step 2 — Auth bootstrap
   useEffect(() => {
     if (!dbReady) return;
 
@@ -79,11 +79,10 @@ function RootLayout() {
       const { user: currentUser } = useAuthStore.getState();
 
       if (!currentUser) {
-        // No stored session — create anonymous session
         try {
           await authService.createAnonymousSession();
         } catch {
-          // Non-fatal: app can still run offline, API calls will fail gracefully
+          // Non-fatal
         }
       }
 
@@ -101,22 +100,28 @@ function RootLayout() {
   }, [authBootstrapped, user?.id]);
 
   // Deep link handler: notification taps navigate to the relevant screen
+  // Skipped entirely in Expo Go — remote push is not available there
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as {
-        screen?: string; gameType?: string;
-      };
-      if (data.screen === 'daily' && data.gameType) {
-        router.push(`/game/${data.gameType}/daily` as never);
-      } else if (data.screen === 'leaderboard') {
-        router.push('/(tabs)/leaderboard' as never);
-      } else if (data.screen === 'profile') {
-        router.push('/(tabs)/profile' as never);
-      } else if (data.screen === 'home') {
-        router.push('/(tabs)/' as never);
-      }
-    });
-    return () => sub.remove();
+    if (IS_EXPO_GO) return;
+    let cleanup: (() => void) | undefined;
+    import('expo-notifications').then((Notifications) => {
+      const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+        const data = response.notification.request.content.data as {
+          screen?: string; gameType?: string;
+        };
+        if (data.screen === 'daily' && data.gameType) {
+          router.push(`/game/${data.gameType}/daily` as never);
+        } else if (data.screen === 'leaderboard') {
+          router.push('/(tabs)/leaderboard' as never);
+        } else if (data.screen === 'profile') {
+          router.push('/(tabs)/profile' as never);
+        } else if (data.screen === 'home') {
+          router.push('/(tabs)/' as never);
+        }
+      });
+      cleanup = () => sub.remove();
+    }).catch(() => {});
+    return () => cleanup?.();
   }, []);
 
   // Step 3 — Online sync
@@ -145,7 +150,6 @@ function RootLayout() {
     }
   }, [isReady, onboardingDone]);
 
-  // Resolve theme: 'system' defers to device setting
   const resolvedTheme: ResolvedTheme =
     theme === 'system'
       ? (systemColorScheme === 'light' ? 'light' : 'dark')
@@ -195,8 +199,9 @@ function RootLayout() {
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="(auth)" options={{ headerShown: false, presentation: 'modal' }} />
                 <Stack.Screen name="game" options={{ headerShown: false }} />
-                <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-                <Stack.Screen name="(legal)" options={{ headerShown: false }} />
+                <Stack.Screen name="onboarding/index" options={{ headerShown: false }} />
+                <Stack.Screen name="(legal)/privacy" options={{ headerShown: false }} />
+                <Stack.Screen name="(legal)/terms" options={{ headerShown: false }} />
               </Stack>
             )}
           </QueryClientProvider>

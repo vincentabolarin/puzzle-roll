@@ -1,8 +1,8 @@
-import { View, Text, ScrollView, Switch, TouchableOpacity, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, ScrollView, Switch, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { useSettingsStore, ThemeOption } from '../../src/stores/settings.store';
 import { useAuthStore } from '../../src/stores/auth.store';
 import { useTheme } from '../_layout';
@@ -10,6 +10,8 @@ import { themes } from '../../src/lib/theme';
 import { apiClient } from '../../src/lib/api-client';
 import { queryKeys } from '../../src/lib/query-client';
 import { usePushNotifications } from '../../src/hooks/usePushNotifications';
+
+const IS_EXPO_GO = Constants.appOwnership === 'expo';
 
 const THEME_OPTIONS: { value: ThemeOption; label: string; icon: string }[] = [
   { value: 'light',  label: 'Light',  icon: '☀️' },
@@ -52,16 +54,14 @@ export default function SettingsScreen() {
   // ─── Server-side notification settings ──────────────────────────────────────
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [notifHour, setNotifHour] = useState(8);
-  const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
+  const [permissionStatus, setPermissionStatus] = useState<string>('unavailable');
 
-  // Read current server settings
   const { data: meData, isLoading: meLoading } = useQuery({
     queryKey: queryKeys.user.me,
     queryFn: () => apiClient.get<UserSettingsResponse>('/users/me'),
     enabled: !!user && !user.isAnonymous,
   });
 
-  // Sync local state from server on load
   useEffect(() => {
     if (meData?.settings) {
       setNotifEnabled(meData.settings.notificationEnabled);
@@ -69,11 +69,14 @@ export default function SettingsScreen() {
     }
   }, [meData]);
 
-  // Check device permission status
+  // Check device permission status — skipped entirely in Expo Go
   useEffect(() => {
-    Notifications.getPermissionsAsync().then(({ status }) => {
-      setPermissionStatus(status);
-    });
+    if (IS_EXPO_GO) return;
+    import('expo-notifications').then(({ getPermissionsAsync }) => {
+      getPermissionsAsync()
+        .then(({ status }) => setPermissionStatus(status))
+        .catch(() => {});
+    }).catch(() => {});
   }, []);
 
   const { mutate: saveNotifSettings, isPending: savingNotif } = useMutation({
@@ -89,15 +92,17 @@ export default function SettingsScreen() {
   });
 
   const handleToggleNotifications = async (value: boolean) => {
+    if (IS_EXPO_GO) return;
     setNotifEnabled(value);
     if (value && permissionStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
+      const { status } = await import('expo-notifications').then((m) =>
+        m.requestPermissionsAsync()
+      ).catch(() => ({ status: 'denied' }));
       setPermissionStatus(status);
       if (status !== 'granted') {
         setNotifEnabled(false);
         return;
       }
-      // Register token now that permission is granted
       await registerForPushNotifications();
     }
     saveNotifSettings({ notificationEnabled: value, notificationHour: notifHour });
@@ -132,6 +137,7 @@ export default function SettingsScreen() {
 
   const isLoggedIn = !!user && !user.isAnonymous;
   const isDark = resolvedTheme === 'dark';
+  const notificationsUnavailable = IS_EXPO_GO || permissionStatus === 'unavailable';
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.background }]} edges={['top']}>
@@ -202,7 +208,13 @@ export default function SettingsScreen() {
         {/* ── Notifications ───────────────────────────────────────────────── */}
         <Text style={[styles.sectionLabel, { color: t.textMuted }]}>Notifications</Text>
         <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.borderSubtle }]}>
-          {!isLoggedIn ? (
+          {IS_EXPO_GO ? (
+            <View style={styles.row}>
+              <Text style={[styles.rowDesc, { color: t.textMuted, flex: 1 }]}>
+                Push notifications are not available in Expo Go. Use a development build to enable them.
+              </Text>
+            </View>
+          ) : !isLoggedIn ? (
             <View style={styles.row}>
               <Text style={[styles.rowDesc, { color: t.textMuted, flex: 1 }]}>
                 Sign in to enable daily puzzle reminders and streak alerts.
@@ -214,7 +226,6 @@ export default function SettingsScreen() {
             </View>
           ) : (
             <>
-              {/* Permission warning */}
               {permissionStatus === 'denied' && (
                 <View style={[styles.permissionBanner, { backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2', borderBottomColor: t.borderSubtle }]}>
                   <Text style={{ color: '#ef4444', fontFamily: 'SpaceGrotesk-Medium', fontSize: 12 }}>
@@ -223,7 +234,6 @@ export default function SettingsScreen() {
                 </View>
               )}
 
-              {/* Enable toggle */}
               <View style={styles.row}>
                 <View style={{ flex: 1, marginRight: 12 }}>
                   <Text style={[styles.rowLabel, { color: t.textPrimary }]}>Daily reminders</Text>
@@ -240,7 +250,6 @@ export default function SettingsScreen() {
                 />
               </View>
 
-              {/* Hour picker — only shown when enabled */}
               {notifEnabled && (
                 <>
                   <View style={[styles.divider, { backgroundColor: t.borderSubtle }]} />
