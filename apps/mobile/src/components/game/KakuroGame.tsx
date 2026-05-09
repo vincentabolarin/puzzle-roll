@@ -17,6 +17,7 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
 
 interface KBlackCell { type: 'black'; acrossClue: number | null; downClue: number | null }
 interface KWhiteCell { type: 'white'; value: number }
@@ -40,10 +41,11 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [solution, setSolution] = useState<{ values: Array<{ row: number; col: number; value: number }> } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [pressedDigit, setPressedDigit] = useState<number | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  const { loadSolution } = usePuzzleSolution<{ values: Array<{ row: number; col: number; value: number }> }>(puzzleId);
 
   if (!puzzleData || typeof (puzzleData as KakuroPuzzleData).size !== 'number') return null;
   const pd = puzzleData as KakuroPuzzleData;
@@ -66,7 +68,6 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     startSession({ puzzleId, gameType: GameType.KAKURO, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: raw, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 });
     setInitialized(true);
   }
-  const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: typeof solution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;

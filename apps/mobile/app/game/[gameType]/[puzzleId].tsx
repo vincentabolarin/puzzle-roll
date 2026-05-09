@@ -9,16 +9,7 @@ import { queryKeys } from '@/lib/query-client';
 import { puzzleCache } from '@/services/puzzle-cache.service';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useAppTheme } from '@/hooks/useAppTheme';
-import SudokuGame from '@/components/game/SudokuGame';
-import TangoGame from '@/components/game/TangoGame';
-import QueensGame from '@/components/game/QueensGame';
-import ZipGame from '@/components/game/ZipGame';
-import NonogramGame from '@/components/game/NonogramGame';
-import MinesweeperGame from '@/components/game/MinesweeperGame';
-import KakuroGame from '@/components/game/KakuroGame';
-import LightUpGame from '@/components/game/LightUpGame';
-import FutoshikiGame from '@/components/game/FutoshikiGame';
-import HitoriGame from '@/components/game/HitoriGame';
+import { GAME_REGISTRY } from '@/lib/game-registry';
 
 type GameProps = {
   puzzleId: string;
@@ -29,19 +20,6 @@ type GameProps = {
   onNextPuzzle?: () => void;
   puzzleNumber?: number;
   difficulty?: Difficulty;
-};
-
-const GAME_COMPONENTS: Partial<Record<GameType, React.ComponentType<GameProps>>> = {
-  [GameType.SUDOKU]: SudokuGame,
-  [GameType.TANGO]: TangoGame,
-  [GameType.QUEENS]: QueensGame,
-  [GameType.ZIP]: ZipGame,
-  [GameType.NONOGRAM]: NonogramGame,
-  [GameType.MINESWEEPER]: MinesweeperGame,
-  [GameType.KAKURO]: KakuroGame,
-  [GameType.LIGHT_UP]: LightUpGame,
-  [GameType.FUTOSHIKI]: FutoshikiGame,
-  [GameType.HITORI]: HitoriGame,
 };
 
 function GameErrorFallback({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) {
@@ -91,7 +69,7 @@ export default function ActivePuzzleScreen() {
   const puzzleList = puzzleListResponse?.data;
 
   const gt = (gameType ?? '') as GameType;
-  const GameComponent = GAME_COMPONENTS[gt];
+  const GameComponent = GAME_REGISTRY[gt];
 
   const puzzleIndex = puzzleList ? puzzleList.findIndex((p) => p.id === puzzleId) : -1;
   const puzzleNumber = puzzleIndex >= 0 ? puzzleIndex + 1 : undefined;

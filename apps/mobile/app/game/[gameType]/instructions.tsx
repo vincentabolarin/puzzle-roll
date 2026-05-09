@@ -51,6 +51,7 @@ const INSTRUCTIONS: Record<string, InstructionSet> = {
       'The path must visit every cell in the grid exactly once.',
       'The path must pass through waypoints 1, 2, 3… in order.',
       'The path can only move horizontally or vertically — never diagonally.',
+      'Thick lines between cells are walls — the path cannot cross them.',
     ],
     tips: [
       'Work from one waypoint to the next rather than the full grid at once.',
@@ -60,15 +61,15 @@ const INSTRUCTIONS: Record<string, InstructionSet> = {
   },
   [GameType.TANGO]: {
     title: 'Tango', emoji: '☯️',
-    objective: 'Fill the grid with suns and moons so that rows, columns, and constraints are all satisfied.',
+    objective: 'Fill the grid with blue and yellow circles so that rows, columns, and constraints are all satisfied.',
     rules: [
-      'Each row and column must have exactly equal numbers of suns and moons.',
-      'No three consecutive suns or moons in a row or column.',
-      '= means adjacent cells must match; × means they must differ.',
+      'Each row and column must have exactly equal numbers of blue and yellow circles.',
+      'No three consecutive circles of the same colour in a row or column.',
+      '= means adjacent cells must be the same colour; × means they must differ.',
     ],
     tips: [
-      'If a row already has half suns, the remaining empty cells must all be moons.',
-      'Look for runs of two identical symbols — the next cell must be the opposite.',
+      'If a row already has half blues, the remaining empty cells must all be yellow.',
+      'Look for runs of two identical colours — the next cell must be the opposite.',
       'Constraints (= and ×) near corners give strong deductions.',
     ],
   },

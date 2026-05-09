@@ -17,6 +17,7 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
 
 const WAYPOINT_COLORS = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#ef4444','#8b5cf6','#14b8a6'];
 const PATH_COLOR = '#f59e0b';
@@ -41,10 +42,11 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, 
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [solution, setSolution] = useState<{ path: PathPt[] } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { loadSolution } = usePuzzleSolution<{ path: PathPt[] }>(puzzleId);
 
   const pd = puzzleData as ZipPuzzleData;
   const { size, grid } = pd;
@@ -86,7 +88,6 @@ export default function ZipGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, 
 
   function startFresh() { startSession({ puzzleId, gameType: GameType.ZIP, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: buildInitial(), initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 }); setInitialized(true); }
   function continueFromSave() { startSession({ puzzleId, gameType: GameType.ZIP, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: (savedData?.currentState ?? buildInitial()) as ZipState, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 }); setInitialized(true); }
-  const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: typeof solution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
 
   // Save progress on unmount (covers back-navigation)

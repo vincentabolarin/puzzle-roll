@@ -24,6 +24,7 @@ import CompletionModal from './CompletionModal';
 import PauseModal from './PauseModal';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
 
 interface SudokuGameProps {
   puzzleId: string;
@@ -124,7 +125,6 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const t = useAppTheme();
   const isDark = t.background !== '#f9fafb';
 
-  const [solutionGrid, setSolutionGrid] = useState<SudokuEngine.SudokuGrid | null>(null);
   const [showResumeModal, setShowResumeModal] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -135,13 +135,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const completionScale = useSharedValue(1);
   const completionStyle = useAnimatedStyle(() => ({ transform: [{ scale: completionScale.value }] }));
 
-  const loadSolution = useCallback(async () => {
-    if (solutionGrid) return solutionGrid;
-    try {
-      const r = await apiClient.get<{ id: string; solution: { grid: SudokuEngine.SudokuGrid } }>(`/puzzles/id/${puzzleId}/solution`);
-      setSolutionGrid(r.solution.grid); return r.solution.grid;
-    } catch { return null; }
-  }, [puzzleId, solutionGrid]);
+  const { loadSolution } = usePuzzleSolution<{ grid: SudokuEngine.SudokuGrid }>(puzzleId);
 
   useEffect(() => {
     async function init() { const saved = await loadProgress(puzzleId); if (saved) { setSavedData(saved); setShowResumeModal(true); } else startFresh(); }
@@ -284,7 +278,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
     if (!isNotesMode) {
       const sol = await loadSolution();
-      if (sol) await triggerWin(newBoard, sol);
+      if (sol) await triggerWin(newBoard, sol?.grid);
     }
   }, [gameState, selectedCell, session, isNotesMode, isPaused, autoRemoveNotes, lightImpact, updateState, loadSolution]);
 
@@ -292,11 +286,11 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
-    const hint = SudokuEngine.getHint(gameState, sol); if (!hint) return;
+    const hint = SudokuEngine.getHint(gameState, sol?.grid); if (!hint) return;
     lightImpact(); playSound('hint');
     const hintedBoard = (hint.revealedState as { board: ExtendedBoard }).board;
     updateState(hint.revealedState as SudokuEngine.SudokuGameState & { board: ExtendedBoard });
-    await triggerWin(hintedBoard, sol);
+    await triggerWin(hintedBoard, sol?.grid);
   }, [gameState, isPaused, useHint, showRewardedAd, loadSolution, lightImpact, updateState]);
 
   const handleErase = useCallback(() => {

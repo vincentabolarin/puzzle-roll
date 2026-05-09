@@ -16,6 +16,7 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
 
 interface NonogramData { size: number; rowClues: number[][]; colClues: number[][] }
 type Cell = 'empty' | 'filled' | 'marked';
@@ -23,6 +24,7 @@ interface NGState { board: Cell[][] }
 interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void; puzzleNumber?: number; difficulty?: string }
 
 export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
+  const { loadSolution } = usePuzzleSolution<{ grid: boolean[][] }>(puzzleId);
   const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
@@ -71,7 +73,6 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
 
   function startFresh() { startSession({ puzzleId, gameType: GameType.NONOGRAM, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: buildInitial(), initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 }); setInitialized(true); }
   function continueFromSave() { startSession({ puzzleId, gameType: GameType.NONOGRAM, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: (savedData?.currentState ?? buildInitial()) as NGState, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 }); setInitialized(true); }
-  const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: typeof solution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;
@@ -116,7 +117,7 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     if (!currentSession || currentSession.isSolved) return;
     markSolved(); setIsSolved(true); successNotification(); playSound('complete');
     const sol = await loadSolution(); setSolution(sol);
-    setTimeout(() => setShowSolution(true), 800);
+    setTimeout(() => setShowSolution(true), 300);
     const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
     const shareable = generateShareableResult({ gameType: GameType.NONOGRAM, difficulty: currentSession.difficulty, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
     submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });

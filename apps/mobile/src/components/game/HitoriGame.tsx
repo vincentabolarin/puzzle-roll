@@ -16,6 +16,7 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
 
 type HitoriPuzzleData = HitoriEngine.HitoriPuzzleData;
 type HitoriCell = HitoriEngine.HitoriCell;
@@ -47,9 +48,10 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [solution, setSolution] = useState<HitoriSolution | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [conflicts, setConflicts] = useState<Set<string>>(new Set());
+
+  const { loadSolution } = usePuzzleSolution<HitoriSolution>(puzzleId);
 
   if (!puzzleData || typeof (puzzleData as HitoriPuzzleData).size !== 'number') return null;
 
@@ -72,7 +74,6 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   function startFresh() { startSession({ puzzleId, gameType: GameType.HITORI, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: buildInitial(), initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 }); setInitialized(true); }
   function continueFromSave() { startSession({ puzzleId, gameType: GameType.HITORI, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: (savedData?.currentState ?? buildInitial()) as HitoriGameState, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 }); setInitialized(true); }
-  const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: HitoriSolution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;

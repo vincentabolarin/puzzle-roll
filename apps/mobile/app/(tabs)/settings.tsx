@@ -43,6 +43,7 @@ export default function SettingsScreen() {
     soundEnabled, setSoundEnabled,
     hapticsEnabled, setHapticsEnabled,
     autoRemoveNotes, setAutoRemoveNotes,
+    queensAutoMark, setQueensAutoMark,
     theme, setTheme,
   } = useSettingsStore();
   const { user } = useAuthStore();
@@ -202,6 +203,17 @@ export default function SettingsScreen() {
             description="Erase pencil marks from related cells when you place a digit"
             value={autoRemoveNotes}
             onChange={setAutoRemoveNotes}
+          />
+        </View>
+
+        {/* ── Queens ─────────────────────────────────────────────────────── */}
+        <Text style={[styles.sectionLabel, { color: t.textMuted }]}>Queens</Text>
+        <View style={[styles.card, { backgroundColor: t.surface, borderColor: t.borderSubtle }]}>
+          <SettingRow
+            label="Auto-place markers"
+            description="Automatically mark × in cells that conflict with a placed queen"
+            value={queensAutoMark}
+            onChange={setQueensAutoMark}
           />
         </View>
 

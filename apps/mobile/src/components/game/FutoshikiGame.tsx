@@ -16,6 +16,7 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
 
 type FutoshikiPuzzleData = FutoshikiEngine.FutoshikiPuzzleData;
 type FutoshikiGameState = FutoshikiEngine.FutoshikiGameState;
@@ -44,10 +45,11 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [solution, setSolution] = useState<FutoshikiSolution | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [conflicts, setConflicts] = useState<Set<string>>(new Set());
   const [pressedDigit, setPressedDigit] = useState<number | null>(null);
+
+  const { loadSolution } = usePuzzleSolution<FutoshikiSolution>(puzzleId);
 
   if (!puzzleData || typeof (puzzleData as FutoshikiPuzzleData).size !== 'number') return null;
   const pd = puzzleData as FutoshikiPuzzleData;
@@ -73,7 +75,6 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     startSession({ puzzleId, gameType: GameType.FUTOSHIKI, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: raw, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 });
     setInitialized(true);
   }
-  const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: FutoshikiSolution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;

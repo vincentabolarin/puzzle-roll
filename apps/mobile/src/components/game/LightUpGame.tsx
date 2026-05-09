@@ -16,6 +16,7 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
 
 type LightUpPuzzleData = LightUpEngine.LightUpPuzzleData;
 type LightUpCell = LightUpEngine.LightUpCell;
@@ -48,9 +49,10 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [solution, setSolution] = useState<LightUpSolution | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const lastTapRef = useRef<{ r: number; c: number; time: number } | null>(null);
+
+  const { loadSolution } = usePuzzleSolution<LightUpSolution>(puzzleId);
 
   if (!puzzleData) return null;
   const pd = puzzleData as LightUpPuzzleData;
@@ -72,7 +74,6 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
 
   function startFresh() { startSession({ puzzleId, gameType: GameType.LIGHT_UP, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: buildInitial(), initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 }); setInitialized(true); }
   function continueFromSave() { startSession({ puzzleId, gameType: GameType.LIGHT_UP, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: (savedData?.currentState ?? buildInitial()) as ExtLightUpState, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 }); setInitialized(true); }
-  const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: LightUpSolution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;

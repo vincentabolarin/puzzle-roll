@@ -84,6 +84,7 @@ export default function OnboardingScreen() {
   };
 
   const isLast = activeIndex === SLIDES.length - 1;
+  const accent = SLIDES[activeIndex].accent;
 
   const renderItem: ListRenderItem<Slide> = ({ item }) => (
     <View style={[S.slide, { width: SCREEN_W }]}>
@@ -97,6 +98,9 @@ export default function OnboardingScreen() {
 
   return (
     <SafeAreaView style={S.safe} edges={['top', 'bottom']}>
+      {/* Slide counter */}
+      <Text style={S.counter}>{activeIndex + 1} / {SLIDES.length}</Text>
+
       <FlatList
         ref={flatRef}
         data={SLIDES}
@@ -112,16 +116,20 @@ export default function OnboardingScreen() {
         scrollEventThrottle={16}
       />
 
-      {/* Dots */}
+      {/* Pills */}
       <View style={S.dots}>
         {SLIDES.map((_, i) => (
-          <View
+          <TouchableOpacity
             key={i}
+            onPress={() => {
+              flatRef.current?.scrollToIndex({ index: i, animated: true });
+              setActiveIndex(i);
+            }}
             style={[
               S.dot,
               i === activeIndex
-                ? { backgroundColor: SLIDES[activeIndex].accent, width: 20 }
-                : { backgroundColor: '#374151' },
+                ? { backgroundColor: accent, width: 24 }
+                : { backgroundColor: '#4b5563', width: 8 },
             ]}
           />
         ))}
@@ -130,7 +138,7 @@ export default function OnboardingScreen() {
       {/* Buttons */}
       <View style={S.buttons}>
         {isLast ? (
-          <TouchableOpacity style={[S.primaryBtn, { backgroundColor: SLIDES[activeIndex].accent }]} onPress={finish}>
+          <TouchableOpacity style={[S.primaryBtn, { backgroundColor: accent }]} onPress={finish}>
             <Text style={S.primaryBtnText}>Get started</Text>
           </TouchableOpacity>
         ) : (
@@ -138,7 +146,7 @@ export default function OnboardingScreen() {
             <TouchableOpacity onPress={finish} style={S.skipBtn}>
               <Text style={S.skipText}>Skip</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: SLIDES[activeIndex].accent, flex: 1 }]} onPress={goNext}>
+            <TouchableOpacity style={[S.primaryBtn, { backgroundColor: accent, flex: 1 }]} onPress={goNext}>
               <Text style={S.primaryBtnText}>Next →</Text>
             </TouchableOpacity>
           </View>
@@ -150,6 +158,13 @@ export default function OnboardingScreen() {
 
 const S = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#060818' },
+  counter: {
+    fontFamily: 'SpaceGrotesk-Medium',
+    fontSize: 13,
+    color: '#6b7280',
+    textAlign: 'center',
+    paddingTop: 8,
+  },
   slide: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36, paddingBottom: 80 },
   emojiCircle: { width: 120, height: 120, borderRadius: 60, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', marginBottom: 36 },
   emoji: { fontSize: 56 },

@@ -1,18 +1,24 @@
-import { Injectable, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { CompleteGameDto, SyncProgressDto } from './progress.dto';
 import { UsersService } from '../users/users.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { GameType } from '@puzzle-roll/shared';
 import { PrismaService } from '../common/prisma/prisma.service';
 
+const STREAK_MILESTONES = new Set([7, 30, 100]);
+
 @Injectable()
 export class ProgressService {
-  constructor(private readonly usersService: UsersService, private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly notificationsService: NotificationsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async completeGame(userId: string, dto: CompleteGameDto) {
     // Verify puzzle exists
     const puzzle = await this.prisma.gamePuzzle.findUnique({ where: { id: dto.puzzleId } });
     if (!puzzle) throw new NotFoundException(`Puzzle ${dto.puzzleId} not found`);
-
 
     // Server-side validation for daily completions
     if (dto.isDaily) {
@@ -47,23 +53,39 @@ export class ProgressService {
       },
     });
 
-    // Update user stats
+    // Update user stats and get resulting streak
     const completedDate = dto.completedAt.slice(0, 10);
-    await this.usersService.upsertStats(
+    const updatedStats = await this.usersService.upsertStats(
       userId,
       dto.gameType,
       dto.elapsedSeconds,
       true,
       dto.isDaily,
-      completedDate
+      completedDate,
     );
+
+    // Fire streak milestone notifications on daily completions only
+    if (dto.isDaily && updatedStats && STREAK_MILESTONES.has(updatedStats.currentStreak)) {
+      const pushTokens = await this.prisma.pushToken.findMany({
+        where: { userId },
+        select: { token: true },
+      });
+      for (const { token } of pushTokens) {
+        await this.notificationsService.enqueueStreakMilestones(
+          userId,
+          dto.gameType,
+          updatedStats.currentStreak,
+          token,
+        );
+      }
+    }
 
     return completion;
   }
 
   async syncProgress(userId: string, dto: SyncProgressDto) {
     const results = await Promise.allSettled(
-      dto.completions.map((completion) => this.completeGame(userId, completion))
+      dto.completions.map((completion) => this.completeGame(userId, completion)),
     );
 
     const succeeded = results.filter((r) => r.status === 'fulfilled').length;
@@ -73,7 +95,6 @@ export class ProgressService {
   }
 
   async getUserProgress(userId: string, requestingUserId: string) {
-    // Users can only see their own detailed progress
     if (userId !== requestingUserId) {
       throw new NotFoundException('Progress not found');
     }
@@ -105,20 +126,12 @@ export class ProgressService {
 
   async hasCompletedDaily(userId: string, gameType: GameType, date: string): Promise<boolean> {
     const daily = await this.prisma.dailyPuzzle.findUnique({
-      where: {
-        gameType_date: {
-          gameType: gameType,
-          date,
-        },
-      },
+      where: { gameType_date: { gameType, date } },
     });
-
     if (!daily) return false;
-
     const completion = await this.prisma.gameCompletion.findFirst({
       where: { userId, dailyPuzzleId: daily.id },
     });
-
     return completion !== null;
   }
 }

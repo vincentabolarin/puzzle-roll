@@ -131,7 +131,7 @@ export class UsersService {
         ? elapsedSeconds
         : existing?.bestTime ?? null;
 
-    await this.prisma.userStats.upsert({
+    return this.prisma.userStats.upsert({
       where: { userId_gameType: { userId, gameType } },
       create: {
         userId, gameType,
