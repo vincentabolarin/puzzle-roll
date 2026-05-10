@@ -19,6 +19,7 @@ import { hydratePuzzleProgress } from '../src/stores/puzzle-progress.store';
 import { usePushNotifications } from '../src/hooks/usePushNotifications';
 import { missingVars } from '../src/lib/env';
 import { hasSeenOnboarding } from './onboarding';
+import { useGdprConsent } from '@/hooks/useGdprConsent';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -41,6 +42,7 @@ function RootLayout() {
   const { hydrateFromStorage: hydrateSettings, theme } = useSettingsStore();
   const { isConnected } = useNetworkStatus();
   const { registerForPushNotifications } = usePushNotifications();
+  useGdprConsent();
   const [onboardingDone, setOnboardingDone] = useState(true);
   const systemColorScheme = useColorScheme();
 

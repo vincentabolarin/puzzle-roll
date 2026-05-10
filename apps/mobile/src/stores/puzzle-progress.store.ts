@@ -76,7 +76,11 @@ export const usePuzzleProgressStore = create<PuzzleProgressState & PuzzleProgres
       await AsyncStorage.removeItem(`${PROGRESS_KEY_PREFIX}${puzzleId}`);
       const { completedPuzzleIds, dailyCompletedPuzzleIds } = get();
 
-      const updatedCompleted = new Set([...completedPuzzleIds, puzzleId]);
+      // Daily completions go into dailyCompletedPuzzleIds only — not completedPuzzleIds.
+      // This prevents daily puzzles from being marked "Done" in the free-play list.
+      const updatedCompleted = isDaily
+        ? completedPuzzleIds
+        : new Set([...completedPuzzleIds, puzzleId]);
       const updatedDaily = isDaily
         ? new Set([...dailyCompletedPuzzleIds, puzzleId])
         : dailyCompletedPuzzleIds;

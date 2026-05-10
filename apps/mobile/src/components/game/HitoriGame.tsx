@@ -16,6 +16,12 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
+import { useHintToast } from '@/hooks/useHintToast';
+import HintToastView from '../ui/HintToastView';
+import { useHintHighlight } from '@/hooks/useHintHighlight';
+import HintBox from '../ui/HintBox';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 type HitoriPuzzleData = HitoriEngine.HitoriPuzzleData;
 type HitoriCell = HitoriEngine.HitoriCell;
@@ -47,9 +53,15 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [solution, setSolution] = useState<HitoriSolution | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [conflicts, setConflicts] = useState<Set<string>>(new Set());
+
+  const { loadSolution } = usePuzzleSolution<HitoriSolution>(puzzleId);
+  const { hint, blinkAnim, showHint, dismissHint, isHinted } = useHintHighlight();
+
+  const hintOverlayStyle = useAnimatedStyle(() => ({
+    opacity: blinkAnim.value,
+  }));
 
   if (!puzzleData || typeof (puzzleData as HitoriPuzzleData).size !== 'number') return null;
 
@@ -72,7 +84,6 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   function startFresh() { startSession({ puzzleId, gameType: GameType.HITORI, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: buildInitial(), initialElapsedSeconds: 0, initialHintsUsed: 0, initialHintsRemaining: 3 }); setInitialized(true); }
   function continueFromSave() { startSession({ puzzleId, gameType: GameType.HITORI, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: (savedData?.currentState ?? buildInitial()) as HitoriGameState, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 }); setInitialized(true); }
-  const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: HitoriSolution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;
@@ -130,6 +141,7 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     nb[r][c] = { ...nb[r][c], state: cur === 'shaded' ? 'unshaded' : 'shaded' };
     updateState({ board: nb });
     revalidate(nb);
+    dismissHint();
     await resolveWin(nb);
   }, [gameState, isPaused, isSolved, size, lightImpact, updateState, session, markSolved, successNotification, submit, markCompleted, puzzleId, showInterstitialIfDue, loadSolution]);
 
@@ -151,10 +163,18 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     const hint = HitoriEngine.getHint(gameState, sol);
     if (!hint) return;
     lightImpact(); playSound('hint');
-    const newBoard = hint.revealedState.board as HitoriCell[][];
-    updateState({ board: newBoard });
-    revalidate(newBoard);
-    await resolveWin(newBoard);
+
+    const { row, col } = hint.position!;
+    const shouldShade = (hint.revealedState as any).board[row][col].isShaded;
+    const desc = shouldShade
+      ? `Shade row ${row + 1}, column ${col + 1}. This number appears more than once in its row or column — shading it eliminates the duplicate while keeping the grid connected.`
+      : `Leave row ${row + 1}, column ${col + 1} unshaded. Shading it would either isolate another unshaded cell or create a conflict with an adjacent shaded cell.`;
+    showHint({ row, col, description: desc });
+
+    // const newBoard = hint.revealedState.board as HitoriCell[][];
+    // updateState({ board: newBoard });
+    // revalidate(newBoard);
+    // await resolveWin(newBoard);
   }, [gameState, isPaused, size, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
@@ -216,13 +236,29 @@ export default function HitoriGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
                           {cell.value}
                         </Text>
                       )}
+                      {isHinted(r, c) && (
+                        <Animated.View pointerEvents="none" style={[
+                            { position: 'absolute', inset: 0, backgroundColor: 'rgba(99,102,241,0.5)' },
+                            hintOverlayStyle,
+                          ]}
+                        />
+                      )}
                     </TouchableOpacity>
                   );
                 })}
               </View>
             ))}
           </View>
+
+          {hint && (
+            <HintBox
+              description={hint.description}
+              subText="Tap the highlighted cell to apply"
+              onDismiss={dismissHint}
+            />
+          )}
         </View>
+
       </GenericGameScreen>
       <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All shading will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); setConflicts(new Set()); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
     </>

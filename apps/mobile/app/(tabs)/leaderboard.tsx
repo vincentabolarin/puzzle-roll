@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -24,11 +24,28 @@ export default function LeaderboardScreen() {
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.leaderboard.daily(selectedGame),
-    queryFn: () => apiClient.get<{ gameType: string; date: string; entries: LeaderboardEntry[]; userEntry: LeaderboardEntry | null }>(
+    queryFn: () => apiClient.get<{ gameType: string; date: string; entries: LeaderboardEntry[]; userEntry: LeaderboardEntry | null, hasMore: boolean, total: number }>(
       `/leaderboard/${selectedGame}/daily`
     ),
     enabled: !!user,
   });
+
+  const [offset, setOffset] = useState(0);
+  const [allEntries, setAllEntries] = useState<LeaderboardEntry[]>([]);
+
+  // When data changes, append entries
+  useEffect(() => {
+    if (data?.entries) {
+      if (offset === 0) setAllEntries(data.entries);
+      else setAllEntries(prev => [...prev, ...data.entries]);
+    }
+  }, [data?.entries]);
+
+  // Reset on game change
+  useEffect(() => { setOffset(0); setAllEntries([]); }, [selectedGame]);
+
+  // Pass offset to query
+  queryFn: () => apiClient.get(`/leaderboard/${selectedGame}/daily?limit=50&offset=${offset}`)
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: t.background }]} edges={['top']}>
@@ -65,9 +82,16 @@ export default function LeaderboardScreen() {
               <EntryRow entry={data.userEntry} isCurrentUser t={t} />
             </View>
           )}
+
+          {data?.userEntry && (
+            <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, textAlign: 'center', marginBottom: 8 }}>
+              You are ranked #{data.userEntry.rank} of {data.total} player{data.total > 1 ? 's' : ''}
+            </Text>
+          )}
+          
           <View style={[styles.table, { borderColor: t.borderSubtle, backgroundColor: t.surface }]}>
             {(data?.entries ?? [])
-              .filter((entry) => !data?.userEntry || entry.userId !== data.userEntry.userId)
+              // .filter((entry) => !data?.userEntry || entry.userId !== data.userEntry.userId)
               .map((entry) => (
               <EntryRow key={entry.userId} entry={entry} isCurrentUser={entry.userId === user?.id} t={t} />
             ))}
@@ -75,6 +99,15 @@ export default function LeaderboardScreen() {
               <View style={styles.empty}>
                 <Text style={[styles.emptyText, { color: t.textSecondary }]}>No completions yet today. Be the first!</Text>
               </View>
+            )}
+              
+            {data?.hasMore && (
+              <TouchableOpacity
+                style={{ paddingVertical: 14, alignItems: 'center' }}
+                onPress={() => setOffset(o => o + 50)}
+              >
+                <Text style={{ color: t.accent, fontFamily: 'SpaceGrotesk-Medium' }}>Load more</Text>
+              </TouchableOpacity>
             )}
           </View>
         </ScrollView>
@@ -84,7 +117,7 @@ export default function LeaderboardScreen() {
 }
 
 function EntryRow({ entry, isCurrentUser, t }: { entry: LeaderboardEntry; isCurrentUser: boolean; t: ReturnType<typeof useAppTheme> }) {
-  const medal = entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : null;
+  const medal = entry.rank === 1 ? '1🥇' : entry.rank === 2 ? '2🥈' : entry.rank === 3 ? '3🥉' : null;
   return (
     <View style={[styles.entryRow, isCurrentUser && { backgroundColor: t.accent + '18' }]}>
       <Text style={[styles.rank, { color: t.textSecondary }]}>{medal ?? entry.rank}</Text>

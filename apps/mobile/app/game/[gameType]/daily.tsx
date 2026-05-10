@@ -3,43 +3,12 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorBoundary } from 'react-error-boundary';
-import { GameType } from '@puzzle-roll/shared';
+import { Difficulty, GameType } from '@puzzle-roll/shared';
 import { apiClient } from '../../../src/lib/api-client';
-import { queryKeys } from '../../../src/lib/query-client';
 import { puzzleCache } from '../../../src/services/puzzle-cache.service';
 import { useAppTheme } from '../../../src/hooks/useAppTheme';
-import SudokuGame from '../../../src/components/game/SudokuGame';
-import TangoGame from '../../../src/components/game/TangoGame';
-import QueensGame from '../../../src/components/game/QueensGame';
-import ZipGame from '../../../src/components/game/ZipGame';
-import NonogramGame from '../../../src/components/game/NonogramGame';
-import MinesweeperGame from '../../../src/components/game/MinesweeperGame';
-import KakuroGame from '../../../src/components/game/KakuroGame';
-import LightUpGame from '../../../src/components/game/LightUpGame';
-import FutoshikiGame from '../../../src/components/game/FutoshikiGame';
-import HitoriGame from '../../../src/components/game/HitoriGame';
-
-type GameProps = {
-  puzzleId: string;
-  puzzleData: unknown;
-  solution: unknown;
-  isDaily: boolean;
-  dailyPuzzleId: string | null;
-  onNextPuzzle?: () => void;
-};
-
-const GAME_COMPONENTS: Partial<Record<GameType, React.ComponentType<GameProps>>> = {
-  [GameType.SUDOKU]: SudokuGame,
-  [GameType.TANGO]: TangoGame,
-  [GameType.QUEENS]: QueensGame,
-  [GameType.ZIP]: ZipGame,
-  [GameType.NONOGRAM]: NonogramGame,
-  [GameType.MINESWEEPER]: MinesweeperGame,
-  [GameType.KAKURO]: KakuroGame,
-  [GameType.LIGHT_UP]: LightUpGame,
-  [GameType.FUTOSHIKI]: FutoshikiGame,
-  [GameType.HITORI]: HitoriGame,
-};
+import { GAME_REGISTRY } from '@/lib/game-registry';
+import { useAuthStore } from '@/stores/auth.store';
 
 function ErrorFallback({ resetErrorBoundary }: { resetErrorBoundary: () => void }) {
   const t = useAppTheme();
@@ -56,42 +25,76 @@ function ErrorFallback({ resetErrorBoundary }: { resetErrorBoundary: () => void 
 export default function DailyPuzzleScreen() {
   const { gameType } = useLocalSearchParams<{ gameType: GameType }>();
   const t = useAppTheme();
-
   const today = new Date().toISOString().slice(0, 10);
 
-  const { data, isLoading } = useQuery({
-    // queryKey: queryKeys.puzzles.daily(gameType ?? ''),
-    queryKey: ['daily-puzzle', gameType, today],
+  const { user } = useAuthStore();
 
+  if (!user || user.isAnonymous) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.background, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }} edges={['top']}>
+        <Text style={{ fontSize: 40, marginBottom: 16 }}>🏆</Text>
+        <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 22, textAlign: 'center', marginBottom: 10 }}>
+          Sign in to play daily puzzles
+        </Text>
+        <Text style={{ color: t.textSecondary, fontFamily: 'SpaceGrotesk-Regular', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 28 }}>
+          Daily puzzles, streaks, and leaderboards require an account.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#6366f1', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 32 }}
+          onPress={() => router.push('/(auth)/login' as never)}
+        >
+          <Text style={{ color: '#fff', fontFamily: 'SpaceGrotesk-Bold', fontSize: 15 }}>Sign in</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={{ marginTop: 12 }} onPress={() => router.push('/(auth)/register' as never)}>
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13 }}>Create a free account</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={{ marginTop: 20 }} onPress={() => router.back()}>
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13 }}>← Go back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['daily-puzzle', gameType, today],
     queryFn: async () => {
-      const today = new Date().toISOString().slice(0, 10);
       const cached = await puzzleCache.getDailyPuzzle(gameType ?? '', today);
       if (cached) {
         return {
           dailyPuzzleId: cached.dailyPuzzleId,
           puzzleId: cached.puzzleId,
           puzzleData: JSON.parse(cached.puzzleData),
+          difficulty: cached.difficulty ?? undefined,
         };
       }
       const result = await apiClient.get<{
         dailyPuzzleId: string;
-        puzzle: { id: string; puzzleData: unknown };
+        puzzle: { id: string; puzzleData: unknown; difficulty: Difficulty };
       }>(`/puzzles/${gameType}/daily`);
-      // Guard: API returns puzzle nested under .puzzle
       if (!result.puzzle || result.puzzle.puzzleData == null) {
         throw new Error('Daily puzzle data unavailable');
       }
+      // Cache with difficulty for next time
+      await puzzleCache.cacheDailyPuzzle({
+        gameType: gameType as GameType,
+        date: today,
+        dailyPuzzleId: result.dailyPuzzleId,
+        puzzleId: result.puzzle.id,
+        puzzleData: result.puzzle.puzzleData,
+        difficulty: result.puzzle.difficulty,
+      });
       return {
         dailyPuzzleId: result.dailyPuzzleId,
         puzzleId: result.puzzle.id,
         puzzleData: result.puzzle.puzzleData,
+        difficulty: result.puzzle.difficulty,
       };
     },
     enabled: !!gameType,
   });
 
   const gt = (gameType ?? '') as GameType;
-  const GameComponent = GAME_COMPONENTS[gt];
+  const GameComponent = GAME_REGISTRY[gt];
 
   if (isLoading) {
     return (
@@ -123,6 +126,7 @@ export default function DailyPuzzleScreen() {
           solution={null}
           isDaily
           dailyPuzzleId={data.dailyPuzzleId}
+          difficulty={data.difficulty}
         />
       </ErrorBoundary>
     </SafeAreaView>

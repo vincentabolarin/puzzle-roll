@@ -24,6 +24,11 @@ import CompletionModal from './CompletionModal';
 import PauseModal from './PauseModal';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
+import { useHintToast } from '@/hooks/useHintToast';
+import HintToastView from '../ui/HintToastView';
+import { useHintHighlight } from '@/hooks/useHintHighlight';
+import HintBox from '../ui/HintBox';
 
 interface SudokuGameProps {
   puzzleId: string;
@@ -124,7 +129,6 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const t = useAppTheme();
   const isDark = t.background !== '#f9fafb';
 
-  const [solutionGrid, setSolutionGrid] = useState<SudokuEngine.SudokuGrid | null>(null);
   const [showResumeModal, setShowResumeModal] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -135,13 +139,11 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const completionScale = useSharedValue(1);
   const completionStyle = useAnimatedStyle(() => ({ transform: [{ scale: completionScale.value }] }));
 
-  const loadSolution = useCallback(async () => {
-    if (solutionGrid) return solutionGrid;
-    try {
-      const r = await apiClient.get<{ id: string; solution: { grid: SudokuEngine.SudokuGrid } }>(`/puzzles/id/${puzzleId}/solution`);
-      setSolutionGrid(r.solution.grid); return r.solution.grid;
-    } catch { return null; }
-  }, [puzzleId, solutionGrid]);
+  const { loadSolution } = usePuzzleSolution<{ grid: SudokuEngine.SudokuGrid }>(puzzleId);
+  const { hint, blinkAnim, showHint, dismissHint, isHinted } = useHintHighlight();
+  const hintOverlayStyle = useAnimatedStyle(() => ({
+    opacity: blinkAnim.value,
+  }));
 
   useEffect(() => {
     async function init() { const saved = await loadProgress(puzzleId); if (saved) { setSavedData(saved); setShowResumeModal(true); } else startFresh(); }
@@ -284,7 +286,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
     if (!isNotesMode) {
       const sol = await loadSolution();
-      if (sol) await triggerWin(newBoard, sol);
+      if (sol) await triggerWin(newBoard, sol?.grid);
     }
   }, [gameState, selectedCell, session, isNotesMode, isPaused, autoRemoveNotes, lightImpact, updateState, loadSolution]);
 
@@ -292,12 +294,31 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
-    const hint = SudokuEngine.getHint(gameState, sol); if (!hint) return;
+    const hint = SudokuEngine.getHint(gameState, sol?.grid); if (!hint) return;
     lightImpact(); playSound('hint');
+
+    // Apply hinted board and clear ALL error flags — the hint places a correct
+    // value so no conflicts remain for that cell, and stale error highlights
+    // on other cells must also be recomputed from scratch.
     const hintedBoard = (hint.revealedState as { board: ExtendedBoard }).board;
-    updateState(hint.revealedState as SudokuEngine.SudokuGameState & { board: ExtendedBoard });
-    await triggerWin(hintedBoard, sol);
-  }, [gameState, isPaused, useHint, showRewardedAd, loadSolution, lightImpact, updateState]);
+    const { row, col } = hint.position!;
+
+    showHint({ row, col, description: hint.description });
+
+    const freshConflicts = SudokuEngine.getBoardConflicts(hintedBoard);
+    const conflictSet = new Set(freshConflicts.map(([r, c]) => `${r},${c}`));
+
+    const cleanBoard: ExtendedBoard = hintedBoard.map((r, ri) => r.map((cell, ci) => {
+      if (ri === row && ci === col) return { ...cell, isError: false, isWrongEntry: false };
+      if (!conflictSet.has(`${ri},${ci}`)) return { ...cell, isError: false, isWrongEntry: false };
+      return cell;
+    }));
+
+
+    updateState({ ...hint.revealedState, board: cleanBoard } as SudokuEngine.SudokuGameState & { board: ExtendedBoard });
+    dismissHint();
+    await triggerWin(cleanBoard, sol?.grid);
+  }, [gameState, isPaused, useHint, showRewardedAd, loadSolution, lightImpact, updateState, showHint]);
 
   const handleErase = useCallback(() => {
     if (!gameState || !selectedCell || session?.isSolved || isPaused) return;
@@ -374,14 +395,24 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
       <ScrollView contentContainerStyle={[styles.scroll, isTablet && styles.scrollTablet]} showsVerticalScrollIndicator={false}>
         <Animated.View style={[completionStyle, { marginTop: 8 }]}>
-          <View style={{ width: boardSize, height: boardSize, borderTopWidth: 2, borderLeftWidth: 2, borderColor: isDark ? '#374151' : '#6b7280' }}>
+          <View style={{ width: boardSize, height: boardSize, borderTopWidth: 2, borderBottomWidth: 2, borderRightWidth: 2, borderLeftWidth: 2, borderColor: isDark ? '#374151' : '#6b7280' }}>
             {board.map((row, ri) => (
               <View key={ri} style={{ flexDirection: 'row' }}>
                 {row.map((cell, ci) => (
-                  <CellView key={ci} cell={cell} row={ri} col={ci}
-                    isSelected={selectedCell?.row === ri && selectedCell?.col === ci}
-                    isHighlighted={getHighlighted(ri, ci)}
-                    cellSize={cellSize} onPress={() => handleCellPress(ri, ci)} isDark={isDark} />
+                  <View key={ci} style={{ position: 'relative' }}>
+                    <CellView cell={cell} row={ri} col={ci}
+                      isSelected={selectedCell?.row === ri && selectedCell?.col === ci}
+                      isHighlighted={getHighlighted(ri, ci)}
+                      cellSize={cellSize} onPress={() => handleCellPress(ri, ci)} isDark={isDark}
+                    />
+                    {isHinted(ri, ci) && (
+                      <Animated.View pointerEvents="none" style={[
+                          { position: 'absolute', inset: 0, backgroundColor: 'rgba(99,102,241,0.5)' },
+                          hintOverlayStyle,
+                        ]}
+                      />
+                    )}
+                  </View>
                 ))}
               </View>
             ))}
@@ -422,6 +453,14 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
             ))}
           </View>
         </View>
+
+       {hint && (
+        <HintBox
+          description={hint.description}
+          subText="Tap the highlighted cell to apply"
+          onDismiss={dismissHint}
+        />
+      )}
       </ScrollView>
 
       <PauseModal visible={isPaused && !session.isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} gameName="Sudoku" onResume={resumeTimer} />

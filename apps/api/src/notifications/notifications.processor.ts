@@ -8,6 +8,9 @@ import {
   StreakNudgeJobData,
   NotificationsService,
 } from './notifications.service';
+import { LeaderboardService } from '../leaderboard/leaderboard.service';
+import { PrismaService } from '../common/prisma/prisma.service';
+import { GameType } from '@puzzle-roll/shared';
 
 const GAME_NAMES: Record<string, string> = {
   sudoku: 'Sudoku',
@@ -22,6 +25,7 @@ const GAME_NAMES: Record<string, string> = {
   hitori: 'Hitori',
 };
 
+const GAME_TYPES = Object.keys(GAME_NAMES) as GameType[];
 const GAME_LIST = Object.keys(GAME_NAMES);
 
 @Processor(NOTIFICATION_QUEUE)
@@ -29,7 +33,11 @@ export class NotificationsProcessor {
   private readonly logger = new Logger(NotificationsProcessor.name);
   private readonly expo = new Expo();
 
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly leaderboardService: LeaderboardService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Process('daily-reminder')
   async handleDailyReminder(job: Job<DailyReminderJobData>): Promise<void> {
@@ -104,9 +112,60 @@ export class NotificationsProcessor {
       to: pushToken,
       sound: 'default',
       title: '🏆 Weekly Champion!',
-      body: `You topped this week's ${gameType} leaderboard. Your champion badge is live!`,
+      body: `You topped this week's ${GAME_NAMES[gameType] ?? gameType} leaderboard. Your champion badge is live!`,
       data: { screen: 'leaderboard', gameType, url: `puzzleroll://leaderboard/${gameType}` },
     }]);
+    this.logger.log(`Sent weekly champion notification for ${gameType} to user ${job.data.userId}`);
   }
 
+  /**
+   * Fired by the weekly cron (every Monday 00:05 UTC).
+   * Awards badges for all 10 game types and enqueues push notifications for winners.
+   */
+  @Process('award-weekly-champions')
+  async handleAwardWeeklyChampions(_job: Job<Record<string, never>>): Promise<void> {
+    this.logger.log('Running weekly champion award job');
+
+    const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    for (const gt of GAME_TYPES) {
+      try {
+        const weekly = await this.leaderboardService.getWeeklyLeaderboard(gt, 1);
+        if (weekly.entries.length === 0) {
+          this.logger.debug(`No completions for ${gt} this week — skipping`);
+          continue;
+        }
+
+        const winner = weekly.entries[0];
+
+        // Upsert the badge
+        await this.prisma.userBadge.upsert({
+          where: { userId_badgeType_gameType: { userId: winner.userId, badgeType: 'weekly_champion', gameType: gt } },
+          create: { userId: winner.userId, badgeType: 'weekly_champion', gameType: gt, expiresAt: expiry },
+          update: { awardedAt: new Date(), expiresAt: expiry },
+        });
+
+        this.logger.log(`Awarded weekly_champion badge for ${gt} to user ${winner.userId}`);
+
+        // Notify the winner if they have a push token
+        const pushTokens = await this.prisma.pushToken.findMany({
+          where: { userId: winner.userId },
+          select: { token: true },
+        });
+
+        for (const { token } of pushTokens) {
+          await this.notificationsService.enqueueWeeklyChampionNotification(
+            winner.userId,
+            token,
+            gt,
+          );
+        }
+      } catch (err) {
+        // Don't let one game type failure abort the rest
+        this.logger.error(`Failed to award weekly champion for ${gt}`, err);
+      }
+    }
+
+    this.logger.log('Weekly champion award job complete');
+  }
 }
