@@ -220,6 +220,16 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
 
+        {/* App info */}
+        <TouchableOpacity
+          style={{ alignItems: 'center', paddingVertical: 20, marginTop: 8 }}
+          onPress={() => router.push('/onboarding' as never)}
+        >
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13 }}>
+            📖 View app guide
+          </Text>
+        </TouchableOpacity>
+
         {/* Total completed */}
         {(stats ?? []).length > 0 && (
           <View style={[S.totalCard, { backgroundColor: t.surface, borderColor: t.borderSubtle }]}>

@@ -78,10 +78,14 @@ export default function OnboardingScreen() {
     }
   };
 
-  const finish = async () => {
+  async function finish() {
     await markOnboardingDone();
-    router.replace('/');
-  };
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  }
 
   const isLast = activeIndex === SLIDES.length - 1;
   const accent = SLIDES[activeIndex].accent;

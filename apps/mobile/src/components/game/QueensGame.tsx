@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { View, Text, StyleSheet, useWindowDimensions, PanResponder, Animated } from 'react-native';
+import { View, Text, StyleSheet, useWindowDimensions, PanResponder } from 'react-native';
 import { TouchableOpacity } from 'react-native';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Svg, Path } from 'react-native-svg';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GameType, Difficulty } from '@puzzle-roll/shared';
@@ -19,45 +20,27 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import HintBox from '../ui/HintBox';
+import { useHintHighlight } from '../../hooks/useHintHighlight';
 import { useSettingsStore } from '../../stores/settings.store';
 
-// Rich, saturated region colours — works on both light and dark
 const REGION_COLORS = [
-  '#818cf8', // indigo
-  '#f472b6', // pink
-  '#fb923c', // orange
-  '#34d399', // emerald
-  '#60a5fa', // blue
-  '#f87171', // red
-  '#a78bfa', // violet
-  '#2dd4bf', // teal
-  '#fbbf24', // amber
-  '#86efac', // green
-  '#67e8f9', // cyan
-  '#e879f9', // fuchsia
+  '#818cf8','#f472b6','#fb923c','#34d399','#60a5fa',
+  '#f87171','#a78bfa','#2dd4bf','#fbbf24','#86efac',
+  '#67e8f9','#e879f9',
 ];
 
 interface QueensPuzzleData { size: number; regions: number[][] }
 type Mark = 'empty' | 'x' | 'queen';
 interface QueensState { board: Mark[][] }
-interface HintState { row: number; col: number; description: string }
 interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; dailyPuzzleId: string | null; onNextPuzzle?: () => void; puzzleNumber?: number; difficulty?: string }
 
-// SVG queen crown icon
 function QueenIcon({ size }: { size: number }) {
   const s = size * 0.62;
   return (
     <Svg width={s} height={s} viewBox="0 0 24 24">
-      <Path
-        d="M2 19h20l-2-9-4 4-4-7-4 7-4-4-2 9z"
-        fill="rgba(0,0,0,0.75)"
-        stroke="rgba(0,0,0,0.4)"
-        strokeWidth={0.5}
-      />
-      <Path
-        d="M5 19h14v1.5H5z"
-        fill="rgba(0,0,0,0.6)"
-      />
+      <Path d="M2 19h20l-2-9-4 4-4-7-4 7-4-4-2 9z" fill="rgba(0,0,0,0.75)" stroke="rgba(0,0,0,0.4)" strokeWidth={0.5} />
+      <Path d="M5 19h14v1.5H5z" fill="rgba(0,0,0,0.6)" />
     </Svg>
   );
 }
@@ -80,34 +63,18 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [hintState, setHintState] = useState<HintState | null>(null);
   const [dragTick, setDragTick] = useState(0);
+  // hint type stored separately so HintBox subtext can reflect it
+  const [hintType, setHintType] = useState<'queen' | 'eliminate'>('queen');
 
-  const blinkAnim = useRef(new Animated.Value(1)).current;
-  const blinkLoop = useRef<Animated.CompositeAnimation | null>(null);
-
-  useEffect(() => {
-    if (hintState) {
-      blinkAnim.setValue(1);
-      blinkLoop.current = Animated.loop(
-        Animated.sequence([
-          Animated.timing(blinkAnim, { toValue: 0.2, duration: 500, useNativeDriver: true }),
-          Animated.timing(blinkAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
-        ])
-      );
-      blinkLoop.current.start();
-    } else {
-      blinkLoop.current?.stop();
-    }
-    return () => { blinkLoop.current?.stop(); };
-  }, [hintState]);
+  const { hint, blinkAnim, showHint, dismissHint, isHinted } = useHintHighlight();
+  const hintOverlayStyle = useAnimatedStyle(() => ({ opacity: blinkAnim.value }));
 
   if (!puzzleData) return null;
   const pd = puzzleData as QueensPuzzleData;
   const { size, regions } = pd;
   const CELL = Math.min(Math.floor((width * 0.94) / size), 54);
 
-  // Refs for PanResponder
   const boardRef = useRef<View>(null);
   const boardOriginRef = useRef({ x: 0, y: 0 });
   const gameStateRef = useRef<QueensState | null>(null);
@@ -186,7 +153,6 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     return true;
   }
 
-  // Auto-mark: after placing a queen, mark all conflicting cells with × if setting is on
   function applyAutoMark(b: Mark[][], qr: number, qc: number): Mark[][] {
     if (!queensAutoMark) return b;
     const nb = b.map(row => [...row]) as Mark[][];
@@ -194,7 +160,6 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     for (let r = 0; r < sz; r++) {
       for (let c = 0; c < sz; c++) {
         if (nb[r][c] === 'empty') {
-          // Same row, col, adjacent diagonal, or same region
           if (r === qr || c === qc || (Math.abs(r - qr) <= 1 && Math.abs(c - qc) <= 1) || regs[r][c] === regs[qr][qc]) {
             nb[r][c] = 'x';
           }
@@ -205,7 +170,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   }
 
   async function afterMove(nb: Mark[][]) {
-    setHintState(null);
+    dismissHint();
     updateState({ board: nb });
     if (checkSolved(nb)) {
       markSolved(); setIsSolved(true); successNotification(); playSound('complete');
@@ -218,31 +183,33 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   const handleCellTap = useCallback(async (r: number, c: number) => {
     if (!gameState || isPaused || isSolved) return;
-    // Tapping the hinted cell places the queen
-    if (hintState && hintState.row === r && hintState.col === c) {
-      const nb = gameState.board.map(row => [...row]) as Mark[][];
-      nb[r][c] = 'queen';
-      lightImpact(); playSound('cell_tap');
-      await afterMove(applyAutoMark(nb, r, c));
-      return;
-    }
     lightImpact(); playSound('cell_tap');
+
+    if (hint) dismissHint();
+
     const nb = gameState.board.map(row => [...row]) as Mark[][];
     const cur = nb[r][c];
+
+    // If this is a hinted elimination cell, place × directly
+    if (hint?.row === r && hint?.col === c && hintType === 'eliminate') {
+      nb[r][c] = 'x';
+      await afterMove(nb);
+      return;
+    }
+
     if (cur === 'empty') nb[r][c] = 'x';
     else if (cur === 'x') { nb[r][c] = 'queen'; await afterMove(applyAutoMark(nb, r, c)); return; }
     else nb[r][c] = 'empty';
     await afterMove(nb);
-  }, [gameState, isPaused, isSolved, lightImpact, hintState, queensAutoMark]);
+  }, [gameState, isPaused, isSolved, lightImpact, hint, hintType, dismissHint, queensAutoMark]);
 
   const handleUndo = useCallback(() => {
     if (isSolved || isPaused) return;
-    setHintState(null);
+    dismissHint();
     undo();
     dragBoardRef.current = null;
-  }, [isSolved, isPaused, undo]);
+  }, [isSolved, isPaused, undo, dismissHint]);
 
-  // PanResponder: fill skipped cells along drag path for smooth continuous marking
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
     onMoveShouldSetPanResponder: (_, g) => {
@@ -266,12 +233,9 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
       const c = Math.floor((pageX - boardOriginRef.current.x) / CELL);
       if (r < 0 || r >= sz || c < 0 || c >= sz) return;
-
-      // Fill all cells between last position and current to avoid gaps
       const last = lastDragPosRef.current;
       const cellsToMark: Array<{ r: number; c: number }> = [];
       if (last) {
-        // Bresenham line fill between last and current cell
         let lr = last.r, lc = last.c;
         const dr = Math.sign(r - lr), dc = Math.sign(c - lc);
         while (lr !== r || lc !== c) {
@@ -283,7 +247,6 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
         cellsToMark.push({ r, c });
       }
       lastDragPosRef.current = { r, c };
-
       let changed = false;
       for (const cell of cellsToMark) {
         const key = `${cell.r},${cell.c}`;
@@ -312,50 +275,197 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   const handleHint = useCallback(async () => {
     if (!gameState || isPaused) return;
+    const currentGameState = gameState;
     const canUse = useHint();
     if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution();
     if (!sol) return;
 
-    // Find first unplaced queen — generate a reasoning description
-    for (const { row, col } of sol.queenPositions) {
-      if (gameState.board[row][col] !== 'queen') {
-        const regionId = regions[row][col];
-        // Count queens already placed
-        const queensPlaced = gameState.board.flat().filter(c => c === 'queen').length;
-        // Describe why this cell
-        let desc = '';
-        if (queensPlaced === 0) {
-          desc = `Start by placing a queen in region ${regionId + 1}. Row ${row + 1}, column ${col + 1} is a safe position.`;
-        } else {
-          // Check what's forcing this cell
-          const rowOccupied = new Set<number>();
-          const colOccupied = new Set<number>();
-          const regOccupied = new Set<number>();
-          for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) {
-            if (gameState.board[r][c] === 'queen') { rowOccupied.add(r); colOccupied.add(c); regOccupied.add(regions[r][c]); }
-          }
-          // Find all empty cells in this region
-          const regionCells: Array<{ r: number; c: number }> = [];
-          for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) {
-            if (regions[r][c] === regionId && gameState.board[r][c] !== 'queen') {
-              const blocked = rowOccupied.has(r) || colOccupied.has(c) ||
-                [...rowOccupied].some(qr => [...colOccupied].some(qc => Math.abs(qr - r) <= 1 && Math.abs(qc - c) <= 1));
-              if (!blocked) regionCells.push({ r, c });
-            }
-          }
-          if (regionCells.length === 1) {
-            desc = `Region ${regionId + 1} has only one valid cell left — row ${row + 1}, column ${col + 1}.`;
-          } else {
-            desc = `Place a queen at row ${row + 1}, column ${col + 1} in region ${regionId + 1}. It's the only position that doesn't conflict with existing queens.`;
+    const placedQueens: Array<{ r: number; c: number }> = [];
+    for (let r = 0; r < size; r++)
+      for (let c = 0; c < size; c++)
+        if (currentGameState.board[r][c] === 'queen') placedQueens.push({ r, c });
+
+    const placedRows = new Set(placedQueens.map(q => q.r));
+    const placedCols = new Set(placedQueens.map(q => q.c));
+    const placedRegs = new Set(placedQueens.map(q => regions[q.r][q.c]));
+
+    function validCellsInRegion(regionId: number): Array<{ r: number; c: number }> {
+      if (placedRegs.has(regionId)) return [];
+      const cells: Array<{ r: number; c: number }> = [];
+      for (let r = 0; r < size; r++) {
+        for (let c = 0; c < size; c++) {
+          if (regions[r][c] !== regionId) continue;
+          if (currentGameState.board[r][c] === 'queen') continue;
+          if (placedRows.has(r) || placedCols.has(c)) continue;
+          if (placedQueens.some(q => Math.abs(q.r - r) === 1 && Math.abs(q.c - c) === 1)) continue;
+          cells.push({ r, c });
+        }
+      }
+      return cells;
+    }
+
+    function validCellsInRow(targetRow: number): number {
+      if (placedRows.has(targetRow)) return 0;
+      let count = 0;
+      for (let c = 0; c < size; c++) {
+        if (currentGameState.board[targetRow][c] === 'queen') continue;
+        if (placedCols.has(c)) continue;
+        if (placedRegs.has(regions[targetRow][c])) continue;
+        if (placedQueens.some(q => Math.abs(q.r - targetRow) === 1 && Math.abs(q.c - c) === 1)) continue;
+        count++;
+      }
+      return count;
+    }
+
+    function validCellsInCol(targetCol: number): number {
+      if (placedCols.has(targetCol)) return 0;
+      let count = 0;
+      for (let r = 0; r < size; r++) {
+        if (currentGameState.board[r][targetCol] === 'queen') continue;
+        if (placedRows.has(r)) continue;
+        if (placedRegs.has(regions[r][targetCol])) continue;
+        if (placedQueens.some(q => Math.abs(q.r - r) === 1 && Math.abs(q.c - targetCol) === 1)) continue;
+        count++;
+      }
+      return count;
+    }
+
+    function wouldDeadlock(qr: number, qc: number): boolean {
+      const qReg = regions[qr][qc];
+      const simQueens = [...placedQueens, { r: qr, c: qc }];
+      const simRows = new Set([...placedRows, qr]);
+      const simCols = new Set([...placedCols, qc]);
+      const simRegs = new Set([...placedRegs, qReg]);
+
+      function simValidInRegion(regionId: number): number {
+        if (simRegs.has(regionId)) return Infinity;
+        let count = 0;
+        for (let r = 0; r < size; r++) {
+          for (let c = 0; c < size; c++) {
+            if (regions[r][c] !== regionId) continue;
+            if (r === qr && c === qc) continue;
+            if (currentGameState.board[r][c] === 'queen') continue;
+            if (simRows.has(r) || simCols.has(c)) continue;
+            if (simQueens.some(q => Math.abs(q.r - r) === 1 && Math.abs(q.c - c) === 1)) continue;
+            count++;
           }
         }
-        lightImpact(); playSound('hint');
-        setHintState({ row, col, description: desc });
-        return;
+        return count;
+      }
+
+      function simValidInRow(targetRow: number): number {
+        if (simRows.has(targetRow)) return Infinity;
+        let count = 0;
+        for (let c = 0; c < size; c++) {
+          if (currentGameState.board[targetRow][c] === 'queen') continue;
+          if (simCols.has(c)) continue;
+          if (simRegs.has(regions[targetRow][c])) continue;
+          if (simQueens.some(q => Math.abs(q.r - targetRow) === 1 && Math.abs(q.c - c) === 1)) continue;
+          count++;
+        }
+        return count;
+      }
+
+      function simValidInCol(targetCol: number): number {
+        if (simCols.has(targetCol)) return Infinity;
+        let count = 0;
+        for (let r = 0; r < size; r++) {
+          if (currentGameState.board[r][targetCol] === 'queen') continue;
+          if (simRows.has(r)) continue;
+          if (simRegs.has(regions[r][targetCol])) continue;
+          if (simQueens.some(q => Math.abs(q.r - r) === 1 && Math.abs(q.c - targetCol) === 1)) continue;
+          count++;
+        }
+        return count;
+      }
+
+      for (let regionId = 0; regionId < size; regionId++) {
+        if (simRegs.has(regionId)) continue;
+        if (simValidInRegion(regionId) === 0) return true;
+      }
+      for (let r = 0; r < size; r++) {
+        if (simRows.has(r)) continue;
+        if (simValidInRow(r) === 0) return true;
+      }
+      for (let c = 0; c < size; c++) {
+        if (simCols.has(c)) continue;
+        if (simValidInCol(c) === 0) return true;
+      }
+      return false;
+    }
+
+    // Step 1: score all solution queen candidates by tightest constraint
+    const candidates: Array<{
+      row: number; col: number; regionId: number;
+      regionCount: number; rowCount: number; colCount: number; minCount: number;
+    }> = [];
+
+    for (const { row, col } of sol.queenPositions) {
+      if (currentGameState.board[row][col] === 'queen') continue;
+      if (wouldDeadlock(row, col)) continue;
+      const regionId = regions[row][col];
+      const regionCount = validCellsInRegion(regionId).length;
+      const rowCount = validCellsInRow(row);
+      const colCount = validCellsInCol(col);
+      const minCount = Math.min(regionCount, rowCount, colCount);
+      candidates.push({ row, col, regionId, regionCount, rowCount, colCount, minCount });
+    }
+
+    if (candidates.length === 0) return;
+    candidates.sort((a, b) => a.minCount - b.minCount);
+    const best = candidates[0];
+
+    // Step 2: only suggest deadlock elimination if the best candidate has
+    // minCount > 2 — i.e. there's no obviously constrained move, so it's
+    // worth telling the player to eliminate a cell first.
+    if (best.minCount > 2) {
+      for (let r = 0; r < size; r++) {
+        for (let c = 0; c < size; c++) {
+          if (currentGameState.board[r][c] !== 'empty') continue;
+          if (placedRows.has(r) || placedCols.has(c) || placedRegs.has(regions[r][c])) continue;
+          const isSolutionCell = sol.queenPositions.some(q => q.row === r && q.col === c);
+          if (isSolutionCell) continue;
+          if (wouldDeadlock(r, c)) {
+            lightImpact(); playSound('hint');
+            setHintType('eliminate');
+            showHint({
+              row: r, col: c,
+              description: `Placing a queen at row ${r + 1}, column ${c + 1} would leave another region, row, or column with no valid cells. Mark it × to eliminate it.`,
+            });
+            return;
+          }
+        }
       }
     }
-  }, [gameState, isPaused, loadSolution, useHint, showRewardedAd, lightImpact, size, regions]);
+
+    // Step 3: suggest the most constrained queen placement
+    const { row, col, regionId, regionCount, rowCount, colCount, minCount } = best;
+    let desc: string;
+    if (minCount === 1) {
+      if (rowCount === 1) {
+        desc = `Row ${row + 1} has only one valid cell left for a queen — column ${col + 1}.`;
+      } else if (colCount === 1) {
+        desc = `Column ${col + 1} has only one valid cell left for a queen — row ${row + 1}.`;
+      } else {
+        desc = `Region ${regionId + 1} has only one valid cell remaining — row ${row + 1}, column ${col + 1}.`;
+      }
+    } else if (placedQueens.length === 0) {
+      desc = `Start with region ${regionId + 1}. Row ${row + 1}, column ${col + 1} is a valid opening position.`;
+    } else if (minCount <= 2) {
+      const constraintName = rowCount === minCount ? `row ${row + 1}` : colCount === minCount ? `column ${col + 1}` : `region ${regionId + 1}`;
+      desc = `${constraintName.charAt(0).toUpperCase() + constraintName.slice(1)} is highly constrained — only ${minCount} valid cells remain. Try row ${row + 1}, column ${col + 1}.`;
+    } else {
+      const isOnlyNonDeadlock = candidates.length === 1;
+      desc = isOnlyNonDeadlock
+        ? `Placing a queen elsewhere in region ${regionId + 1} would leave another region, row, or column with no valid cells. Row ${row + 1}, column ${col + 1} is the only safe choice.`
+        : `Region ${regionId + 1} has ${regionCount} possible cells. Row ${row + 1}, column ${col + 1} works without blocking any other region, row, or column.`;
+    }
+
+    lightImpact(); playSound('hint');
+    setHintType('queen');
+    showHint({ row, col, description: desc });
+  }, [gameState, isPaused, loadSolution, useHint, showRewardedAd, lightImpact, size, regions, showHint]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!displayBoard || !session) return null;
@@ -381,14 +491,6 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
             Tap: mark × → place queen · Drag to mark ×
           </Text>
 
-          {/* Hint popup */}
-          {hintState && (
-            <View style={[styles.hintPopup, { backgroundColor: isDark ? '#1f2937' : '#f0f9ff', borderColor: isDark ? '#818cf8' : '#a5b4fc' }]}>
-              <Text style={[styles.hintText, { color: t.textPrimary }]}>{hintState.description}</Text>
-              <Text style={[styles.hintSub, { color: t.textMuted }]}>Tap the highlighted cell to place the queen</Text>
-            </View>
-          )}
-
           <View {...panResponder.panHandlers}>
             <View
               ref={boardRef}
@@ -399,9 +501,6 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
                   {row.map((cell, c) => {
                     const regionIdx = regions[r][c] % REGION_COLORS.length;
                     const baseColor = REGION_COLORS[regionIdx];
-                    const isHinted = hintState?.row === r && hintState?.col === c;
-
-                    // Region borders — thicker at boundaries, thin within
                     const bTop    = r === 0 || regions[r][c] !== regions[r-1][c] ? 2 : 0.5;
                     const bBottom = r === size-1 || regions[r][c] !== regions[r+1][c] ? 2 : 0.5;
                     const bLeft   = c === 0 || regions[r][c] !== regions[r][c-1] ? 2 : 0.5;
@@ -423,12 +522,11 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
                           borderColor: bColor,
                         }}
                       >
-                        {isHinted && (
-                          <Animated.View style={{
-                            position: 'absolute', inset: 0,
-                            backgroundColor: 'rgba(99,102,241,0.35)',
-                            opacity: blinkAnim,
-                          }} />
+                        {isHinted(r, c) && (
+                          <Animated.View pointerEvents="none" style={[
+                            { position: 'absolute', inset: 0, backgroundColor: 'rgba(99,102,241,0.5)' },
+                            hintOverlayStyle,
+                          ]} />
                         )}
                         {cell === 'queen' && <QueenIcon size={CELL} />}
                         {cell === 'x' && (
@@ -441,6 +539,14 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
               ))}
             </View>
           </View>
+
+          {hint && (
+            <HintBox
+              description={hint.description}
+              subText={hintType === 'eliminate' ? 'Tap the highlighted cell to mark it ×' : 'Tap the highlighted cell to place the queen'}
+              onDismiss={dismissHint}
+            />
+          )}
         </View>
       </GenericGameScreen>
 
@@ -450,7 +556,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
         message="All your marks will be cleared."
         confirmLabel="Reset"
         confirmDanger
-        onConfirm={() => { setShowResetConfirm(false); setHintState(null); dragBoardRef.current = null; updateState(buildInitial()); }}
+        onConfirm={() => { setShowResetConfirm(false); dismissHint(); dragBoardRef.current = null; updateState(buildInitial()); }}
         onCancel={() => setShowResetConfirm(false)}
       />
     </>

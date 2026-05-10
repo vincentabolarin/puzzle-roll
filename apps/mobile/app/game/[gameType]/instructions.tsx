@@ -61,14 +61,14 @@ const INSTRUCTIONS: Record<string, InstructionSet> = {
   },
   [GameType.TANGO]: {
     title: 'Tango', emoji: '☯️',
-    objective: 'Fill the grid with blue and yellow circles so that rows, columns, and constraints are all satisfied.',
+    objective: 'Fill the grid with yellow and blue circles so that rows, columns, and constraints are all satisfied.',
     rules: [
-      'Each row and column must have exactly equal numbers of blue and yellow circles.',
+      'Each row and column must have exactly equal numbers of yellow and blue circles.',
       'No three consecutive circles of the same colour in a row or column.',
       '= means adjacent cells must be the same colour; × means they must differ.',
     ],
     tips: [
-      'If a row already has half blues, the remaining empty cells must all be yellow.',
+      'If a row already has half yellows, the remaining empty cells must all be blue.',
       'Look for runs of two identical colours — the next cell must be the opposite.',
       'Constraints (= and ×) near corners give strong deductions.',
     ],

@@ -17,6 +17,11 @@ import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
 import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
+import { useHintToast } from '@/hooks/useHintToast';
+import HintToastView from '../ui/HintToastView';
+import { useHintHighlight } from '@/hooks/useHintHighlight';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import HintBox from '../ui/HintBox';
 
 type LightUpPuzzleData = LightUpEngine.LightUpPuzzleData;
 type LightUpCell = LightUpEngine.LightUpCell;
@@ -53,6 +58,10 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
   const lastTapRef = useRef<{ r: number; c: number; time: number } | null>(null);
 
   const { loadSolution } = usePuzzleSolution<LightUpSolution>(puzzleId);
+  const { hint, blinkAnim, showHint, dismissHint, isHinted } = useHintHighlight();
+  const hintOverlayStyle = useAnimatedStyle(() => ({
+    opacity: blinkAnim.value,
+  }));
 
   if (!puzzleData) return null;
   const pd = puzzleData as LightUpPuzzleData;
@@ -150,6 +159,7 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
     }
 
     updateState({ board: recomputed }, true);
+    dismissHint();
     await resolveWin(recomputed as unknown as ExtLightUpCell[]);
   }, [gameState, isPaused, isSolved, rows, cols, pd, lightImpact, updateState, session]);
 
@@ -159,10 +169,15 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
     const sol = await loadSolution(); if (!sol) return;
     const hint = LightUpEngine.getHint(gameState as unknown as LightUpGameState, sol); if (!hint) return;
     lightImpact(); playSound('hint');
-    const hintedBoard = hint.revealedState.board as ExtLightUpCell[][];
-    const recomputed = LightUpEngine.computeBoardState(hintedBoard as LightUpCell[][], rows, cols) as ExtLightUpCell[][];
-    updateState({ board: recomputed }, true);
-    await resolveWin(recomputed as unknown as ExtLightUpCell[]);
+    
+    const { row, col } = hint.position!;
+    const desc = `Place a bulb at row ${row + 1}, column ${col + 1}. This is the only cell in its surrounding area that can illuminate all adjacent unlit cells without violating any black cell number constraints.`;
+    showHint({ row, col, description: desc });
+
+    // const hintedBoard = hint.revealedState.board as ExtLightUpCell[][];
+    // const recomputed = LightUpEngine.computeBoardState(hintedBoard as LightUpCell[][], rows, cols) as ExtLightUpCell[][];
+    // updateState({ board: recomputed }, true);
+    // await resolveWin(recomputed as unknown as ExtLightUpCell[]);
   }, [gameState, isPaused, rows, cols, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
@@ -172,17 +187,17 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
 
   return (
     <>
-      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.LIGHT_UP} gameName="Light Up" accentColor="#f59e0b" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle} scrollable>
+      <GenericGameScreen puzzleId={puzzleId} gameType={GameType.LIGHT_UP} gameName="Light Up" accentColor="#f59e0b" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle} scrollable showUndo onUndo={() => { lightImpact(); undo(); }}>
         <View style={{ alignItems: 'center' }}>
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 4, textAlign: 'center' }}>
             Tap: × mark · Double-tap: 💡 bulb · Light every white cell
           </Text>
           {/* Undo button */}
-          <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 10 }}>
+          {/* <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 10 }}>
             <TouchableOpacity onPress={() => { lightImpact(); undo(); }} style={[styles.undoBtn, { backgroundColor: t.surface2, borderColor: t.border }]}>
               <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Medium', fontSize: 13 }}>↩ Undo</Text>
             </TouchableOpacity>
-          </View>
+          </View> */}
           <View style={{ borderWidth: 2, borderColor: isDark ? '#374151' : '#6b7280' }}>
             {board.map((row, r) => (
               <View key={r} style={{ flexDirection: 'row' }}>
@@ -214,12 +229,28 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
                       ) : (cell as ExtLightUpCell).isMarkedX ? (
                         <Text style={{ fontSize: CELL * 0.5, color: isDark ? '#6b7280' : '#9ca3af', fontFamily: 'SpaceGrotesk-Bold' }}>×</Text>
                       ) : null}
+
+                      {isHinted(r, c) && (
+                        <Animated.View pointerEvents="none" style={[
+                            { position: 'absolute', inset: 0, backgroundColor: 'rgba(99,102,241,0.5)' },
+                            hintOverlayStyle,
+                          ]}
+                        />
+                      )}
                     </TouchableOpacity>
                   );
                 })}
               </View>
             ))}
           </View>
+
+          {hint && (
+            <HintBox
+              description={hint.description}
+              subText="Tap the highlighted cell to apply"
+              onDismiss={dismissHint}
+            />
+          )}
         </View>
       </GenericGameScreen>
       <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All bulbs and marks will be removed." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />

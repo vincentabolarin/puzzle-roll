@@ -131,12 +131,12 @@ export class NotificationsProcessor {
     for (const gt of GAME_TYPES) {
       try {
         const weekly = await this.leaderboardService.getWeeklyLeaderboard(gt, 1);
-        if (weekly.length === 0) {
+        if (weekly.entries.length === 0) {
           this.logger.debug(`No completions for ${gt} this week — skipping`);
           continue;
         }
 
-        const winner = weekly[0];
+        const winner = weekly.entries[0];
 
         // Upsert the badge
         await this.prisma.userBadge.upsert({

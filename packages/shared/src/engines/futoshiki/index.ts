@@ -345,7 +345,7 @@ export function getHint(
 
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
-      if (given[r][c] === 0 && board[r][c] === 0) {
+      if (given[r][c] === 0 && board[r][c] !== solution.grid[r][c]) {
         const newBoard = board.map((row) => [...row]);
         newBoard[r][c] = solution.grid[r][c];
         return {

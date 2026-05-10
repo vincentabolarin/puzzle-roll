@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Modal, PanResponder } from 'react-native';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/query-client';
-import { GameType, Difficulty } from '@puzzle-roll/shared';
+import { GameType, Difficulty, NonogramEngine } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useAdMob } from '../../hooks/useAdMob';
@@ -17,6 +17,11 @@ import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
 import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
+import { useHintToast } from '@/hooks/useHintToast';
+import HintToastView from '../ui/HintToastView';
+import { useHintHighlight } from '@/hooks/useHintHighlight';
+import HintBox from '../ui/HintBox';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 interface NonogramData { size: number; rowClues: number[][]; colClues: number[][] }
 type Cell = 'empty' | 'filled' | 'marked';
@@ -25,6 +30,12 @@ interface Props { puzzleId: string; puzzleData: unknown; isDaily: boolean; daily
 
 export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId, onNextPuzzle, puzzleNumber, difficulty }: Props) {
   const { loadSolution } = usePuzzleSolution<{ grid: boolean[][] }>(puzzleId);
+  const { hint, blinkAnim, showHint, dismissHint, isHinted } = useHintHighlight();
+
+  const hintOverlayStyle = useAnimatedStyle(() => ({
+    opacity: blinkAnim.value,
+  }));
+
   const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
@@ -134,6 +145,7 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     if (isDoubleTap) { nb[r][c] = nb[r][c] === 'marked' ? 'empty' : 'marked'; }
     else { nb[r][c] = nb[r][c] === 'filled' ? 'empty' : 'filled'; }
     updateState({ board: nb }, true);
+    dismissHint();
     if (checkSolved(nb)) await triggerWin(nb, session);
   }, [gameState, isPaused, isSolved, lightImpact, session]);
 
@@ -185,10 +197,53 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
+    const hint = NonogramEngine.getHint(gameState, sol);
+    if (!hint) return;
     for (let r = 0; r < size; r++) {
       const rowOk = gameState.board[r].every((c, ci) => (c === 'filled') === sol.grid[r][ci]);
       if (!rowOk) {
         lightImpact(); playSound('hint');
+        
+        const { row } = hint.position!;
+        const pd = puzzleData as { rowClues: number[][]; colClues: number[][] };
+        const clue = pd.rowClues?.[row] ?? [];
+        const clueStr = clue.length > 0 ? clue.join(', ') : '0';
+        const currentRow = gameState.board[row];
+        const filledCount = currentRow.filter(c => c === 'filled').length;
+        const markedCount = currentRow.filter(c => c === 'marked').length;
+        const emptyCount = currentRow.filter(c => c === 'empty').length;
+        const totalRequired = clue.reduce((a, b) => a + b, 0);
+        const totalCells = currentRow.length;
+
+        let desc: string;
+        if (clue.length === 0 || (clue.length === 1 && clue[0] === 0)) {
+          desc = `Row ${row + 1} has a clue of 0 — all cells must be empty (marked ×).`;
+        } else if (emptyCount === 0) {
+          desc = `Row ${row + 1} has no empty cells left but isn't complete — some marks need correcting.`;
+        } else if (totalRequired === totalCells) {
+          desc = `Row ${row + 1} clue (${clueStr}) fills exactly ${totalCells} cells — every cell must be filled.`;
+        } else if (totalRequired + (clue.length - 1) === totalCells) {
+          desc = `Row ${row + 1} clue (${clueStr}) with minimum gaps leaves no room to shift — the blocks lock into place.`;
+        } else if (clue.length === 1) {
+          const block = clue[0];
+          const slack = totalCells - block;
+          if (slack === 0) {
+            desc = `Row ${row + 1} has a single block of ${block} filling all ${totalCells} cells.`;
+          } else if (filledCount > 0) {
+            desc = `Row ${row + 1} has a block of ${block} with ${filledCount} cells already filled — the overlap pins the remaining cells.`;
+          } else {
+            desc = `Row ${row + 1} has a single block of ${block} in ${totalCells} cells. There are only ${slack} positions it can shift — the middle ${Math.max(0, block - slack)} cells must always be filled.`;
+          }
+        } else if (filledCount > 0 && emptyCount <= 2) {
+          desc = `Row ${row + 1} (clue: ${clueStr}) is almost complete — ${filledCount} cells filled, ${markedCount} marked, only ${emptyCount} empty. The remaining cells can be determined.`;
+        } else if (filledCount > 0) {
+          desc = `Row ${row + 1} (clue: ${clueStr}) has ${filledCount} cells already filled. Combined with the clue, the remaining ${emptyCount} empty cells can now be resolved.`;
+        } else {
+          desc = `Row ${row + 1} (clue: ${clueStr}) requires ${totalRequired} filled cells across ${totalCells} total. The overlap between all possible positions pins some cells.`;
+        }
+
+        showHint({ row: hint.position!.row, col: 0, description: desc });
+        
         const nb = gameState.board.map((row, ri) => ri === r ? row.map((_, ci): Cell => sol.grid[r][ci] ? 'filled' : 'marked') : [...row]);
         updateState({ board: nb }, true);
         if (checkSolved(nb)) await triggerWin(nb, session);
@@ -234,11 +289,27 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
                   <TouchableOpacity key={c} onPress={() => handleCellTap(r, c)} disabled={isPaused}
                     style={{ width: CELL, height: CELL, borderWidth: 0.5, borderColor: isDark ? '#374151' : '#9ca3af', backgroundColor: cell === 'filled' ? (isDark ? '#e5e7eb' : '#111827') : cell === 'marked' ? (isDark ? '#1f2937' : '#f3f4f6') : (isDark ? '#060818' : '#ffffff'), alignItems: 'center', justifyContent: 'center' }}>
                     {cell === 'marked' && <Text style={{ fontSize: CELL * 0.55, color: isDark ? '#6b7280' : '#9ca3af', lineHeight: CELL }}>×</Text>}
+
+                    {/* {isHinted(r, c) && (
+                      <Animated.View pointerEvents="none" style={[
+                          { position: 'absolute', inset: 0, backgroundColor: 'rgba(99,102,241,0.5)' },
+                          hintOverlayStyle,
+                        ]}
+                      />
+                    )} */}
                   </TouchableOpacity>
                 ))}
               </View>
             ))}
           </View>
+
+          {hint && (
+            <HintBox
+              description={hint.description}
+              subText="Tap the highlighted cell to apply"
+              onDismiss={dismissHint}
+            />
+          )}
         </View>
       </GenericGameScreen>
 

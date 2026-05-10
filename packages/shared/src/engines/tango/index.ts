@@ -1,6 +1,6 @@
 import { Difficulty, GeneratedPuzzle } from '../../types/core';
 
-export type TangoSymbol = 'blue' | 'yellow' | 'empty';
+export type TangoSymbol = 'yellow' | 'blue' | 'empty';
 export type TangoConstraint = '=' | 'x' | null;
 
 export interface TangoConstraints {
@@ -232,7 +232,7 @@ export function getHint(gameState: TangoGameState, solution: TangoSolution, give
 }
 
 export function cycleTangoSymbol(current: TangoSymbol): TangoSymbol {
-  if (current === 'empty') return 'blue';
-  if (current === 'blue') return 'yellow';
+  if (current === 'empty') return 'yellow';
+  if (current === 'yellow') return 'blue';
   return 'empty';
 }

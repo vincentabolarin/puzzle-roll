@@ -8,6 +8,7 @@ import { apiClient } from '../../../src/lib/api-client';
 import { puzzleCache } from '../../../src/services/puzzle-cache.service';
 import { useAppTheme } from '../../../src/hooks/useAppTheme';
 import { GAME_REGISTRY } from '@/lib/game-registry';
+import { useAuthStore } from '@/stores/auth.store';
 
 function ErrorFallback({ resetErrorBoundary }: { resetErrorBoundary: () => void }) {
   const t = useAppTheme();
@@ -25,6 +26,34 @@ export default function DailyPuzzleScreen() {
   const { gameType } = useLocalSearchParams<{ gameType: GameType }>();
   const t = useAppTheme();
   const today = new Date().toISOString().slice(0, 10);
+
+  const { user } = useAuthStore();
+
+  if (!user || user.isAnonymous) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.background, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }} edges={['top']}>
+        <Text style={{ fontSize: 40, marginBottom: 16 }}>🏆</Text>
+        <Text style={{ color: t.textPrimary, fontFamily: 'SpaceGrotesk-Bold', fontSize: 22, textAlign: 'center', marginBottom: 10 }}>
+          Sign in to play daily puzzles
+        </Text>
+        <Text style={{ color: t.textSecondary, fontFamily: 'SpaceGrotesk-Regular', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 28 }}>
+          Daily puzzles, streaks, and leaderboards require an account.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#6366f1', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 32 }}
+          onPress={() => router.push('/(auth)/login' as never)}
+        >
+          <Text style={{ color: '#fff', fontFamily: 'SpaceGrotesk-Bold', fontSize: 15 }}>Sign in</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={{ marginTop: 12 }} onPress={() => router.push('/(auth)/register' as never)}>
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13 }}>Create a free account</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={{ marginTop: 20 }} onPress={() => router.back()}>
+          <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 13 }}>← Go back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   const { data, isLoading } = useQuery({
     queryKey: ['daily-puzzle', gameType, today],

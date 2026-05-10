@@ -17,6 +17,11 @@ import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
 import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
+import { useHintToast } from '@/hooks/useHintToast';
+import HintToastView from '../ui/HintToastView';
+import { useHintHighlight } from '@/hooks/useHintHighlight';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import HintBox from '../ui/HintBox';
 
 type FutoshikiPuzzleData = FutoshikiEngine.FutoshikiPuzzleData;
 type FutoshikiGameState = FutoshikiEngine.FutoshikiGameState;
@@ -50,6 +55,11 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
   const [pressedDigit, setPressedDigit] = useState<number | null>(null);
 
   const { loadSolution } = usePuzzleSolution<FutoshikiSolution>(puzzleId);
+  const { hint, blinkAnim, showHint, dismissHint, isHinted } = useHintHighlight();
+
+  const hintOverlayStyle = useAnimatedStyle(() => ({
+    opacity: blinkAnim.value,
+  }));
 
   if (!puzzleData || typeof (puzzleData as FutoshikiPuzzleData).size !== 'number') return null;
   const pd = puzzleData as FutoshikiPuzzleData;
@@ -129,6 +139,7 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     if (!gameState || isPaused || isSolved || given[r][c] !== 0) return;
     lightImpact();
     updateState({ ...gameState, selectedCell: { row: r, col: c } }, false);
+    dismissHint();
   }, [gameState, isPaused, isSolved, given, lightImpact, updateState]);
 
   const handleDigit = useCallback(async (digit: number) => {
@@ -149,6 +160,7 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
       const newNotes = { ...notes }; delete newNotes[`${row},${col}`];
       updateState({ ...gameState, board: nb, notes: newNotes }, true);
       revalidate(nb);
+      dismissHint();
       if (nb[row][col] !== 0) await resolveWin(nb);
     }
   }, [gameState, selectedCell, isPaused, isSolved, given, isNotesMode, notes, lightImpact, updateState, session]);
@@ -171,10 +183,24 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
     const sol = await loadSolution(); if (!sol) return;
     const hint = FutoshikiEngine.getHint(gameState, sol, given); if (!hint) return;
     lightImpact(); playSound('hint');
-    const newState = { ...gameState, ...(hint.revealedState as Partial<FutoshikiState>) };
-    updateState(newState, true);
-    revalidate(newState.board);
-    await resolveWin(newState.board);
+    
+    const { row, col } = hint.position!;
+    const value = (hint.revealedState as any).board[row][col];
+    // Check for inequality constraints involving this cell
+    const pd = puzzleData as any;
+    const constraints = pd.constraints ?? [];
+    const relevant = constraints.filter((con: any) =>
+      (con.row1 === row && con.col1 === col) || (con.row2 === row && con.col2 === col)
+    );
+    const desc = relevant.length > 0
+      ? `Place ${value} at row ${row + 1}, column ${col + 1}. It satisfies the inequality constraint${relevant.length > 1 ? 's' : ''} on that cell and doesn't repeat in the row or column.`
+      : `Place ${value} at row ${row + 1}, column ${col + 1}. It's the only digit that fits without repeating in the row or column.`;
+    showHint({ row, col, description: desc });
+
+    // const newState = { ...gameState, ...(hint.revealedState as Partial<FutoshikiState>) };
+    // updateState(newState, true);
+    // revalidate(newState.board);
+    // await resolveWin(newState.board);
   }, [gameState, isPaused, given, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
 
   function getHConSymbol(r: number, c: number): string | null {
@@ -275,6 +301,14 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
                             ))}
                           </View>
                         ) : null}
+
+                        {isHinted(r, c) && (
+                          <Animated.View pointerEvents="none" style={[
+                              { position: 'absolute', inset: 0, backgroundColor: 'rgba(99,102,241,0.5)' },
+                              hintOverlayStyle,
+                            ]}
+                          />
+                        )}
                       </TouchableOpacity>
                       {c < size - 1 && (
                         <View style={{ width: CON_GAP, alignItems: 'center', justifyContent: 'center' }}>
@@ -302,6 +336,14 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
               )}
             </View>
           ))}
+
+          {hint && (
+            <HintBox
+              description={hint.description}
+              subText="Tap the highlighted cell to apply"
+              onDismiss={dismissHint}
+            />
+          )}
         </View>
       </GenericGameScreen>
       <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All your entries will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); setConflicts(new Set()); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
