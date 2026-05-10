@@ -18,6 +18,9 @@ import ConfirmModal from '../ui/ConfirmModal';
 import { apiClient } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-client';
 import { generateShareableResult } from '@/lib/shareable-result';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { useHintHighlight } from '@/hooks/useHintHighlight';
+import HintBox from '../ui/HintBox';
 
 type MSCell = MinesweeperEngine.MinesweeperCell;
 type MSGameState = MinesweeperEngine.MinesweeperGameState;
@@ -53,6 +56,9 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { hint, blinkAnim, showHint, dismissHint, isHinted } = useHintHighlight();
+  const hintOverlayStyle = useAnimatedStyle(() => ({ opacity: blinkAnim.value }));
 
   function showToast(msg: string) {
     setToastMsg(msg);
@@ -183,6 +189,7 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
     const nb = MinesweeperEngine.floodReveal(currentBoard, r, c);
     const won = MinesweeperEngine.checkWin(nb);
     updateState({ ...gameState, board: nb, minesPlaced, isGameOver: false, isWon: won });
+    dismissHint();
     if (won) await handleWin(nb);
   }, [gameState, isPaused, isSolved, config, lightImpact, errorNotification, updateState, session]);
 
@@ -198,18 +205,35 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
   }, [gameState, isPaused, isSolved, mediumImpact, updateState]);
 
   const handleHint = useCallback(async () => {
-    if (!gameState || isPaused) return;
+    if (!gameState || isPaused || isSolved || gameState.isGameOver) return;
     if (!gameState.minesPlaced) {
       showToast('Reveal a cell first, then use a hint 💡');
       return;
     }
-    const hint = MinesweeperEngine.getHint(gameState);
-    if (!hint) { showToast('No hint available right now'); return; }
+    const h = MinesweeperEngine.getHint(gameState);
+    if (!h) { showToast('No hint available right now'); return; }
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     lightImpact(); playSound('hint');
-    updateState(hint.revealedState as MSGameState);
-    if (hint.revealedState.isWon) await handleWin(hint.revealedState.board as MSCell[][]);
-  }, [gameState, isPaused, useHint, showRewardedAd, lightImpact, updateState, session]);
+
+    const { row, col } = h.position!;
+    const revealedNeighbours = ([-1,0,1]).flatMap(dr =>
+      ([-1,0,1]).map(dc => {
+        const nr = row + dr, nc = col + dc;
+        if (nr < 0 || nc < 0 || nr >= gameState.board.length || nc >= gameState.board[0].length) return null;
+        const cell = gameState.board[nr][nc];
+        return cell.state === 'revealed' && !cell.isMine ? cell : null;
+      })
+    ).filter(Boolean);
+
+    const desc = `Row ${row + 1}, column ${col + 1} is safe to reveal. ` +
+      (revealedNeighbours.length > 0
+        ? `The numbered cells around it account for all mines in that area, so this cell cannot contain a mine.`
+        : `Process of elimination rules out a mine here.`);
+
+    showHint({ row, col, description: desc });
+    updateState(h.revealedState as MSGameState);
+    if ((h.revealedState as any).isWon) await handleWin(h.revealedState.board as MSCell[][]);
+  }, [gameState, isPaused, useHint, showRewardedAd, lightImpact, updateState, showHint, session]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!board || !session) return null;
@@ -221,11 +245,6 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
     <>
       <GenericGameScreen puzzleId={puzzleId} gameType={GameType.MINESWEEPER} gameName="Minesweeper" accentColor="#ef4444" isSolved={isSolved} elapsedSeconds={session.elapsedSeconds} hintsUsed={session.hintsUsed} hintsRemaining={session.hintsRemaining} isPaused={isPaused} isDaily={isDaily} shareableResult={shareable} onPauseToggle={isPaused ? resumeTimer : pauseTimer} onReset={() => setShowResetConfirm(true)} onGetHint={handleHint} streak={streak} puzzleNumber={puzzleNumber} difficulty={difficulty} onNextPuzzle={onNextPuzzle} scrollable>
         <View>
-          {toastMsg && (
-            <View style={{ backgroundColor: '#1e3a5f', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 8, alignSelf: 'center' }}>
-              <Text style={{ color: '#93c5fd', fontFamily: 'SpaceGrotesk-Medium', fontSize: 12, textAlign: 'center' }}>{toastMsg}</Text>
-            </View>
-          )}
           <Text style={{ color: t.textMuted, fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginBottom: 4, textAlign: 'center' }}>
             Tap: reveal · Long-press: flag 🚩 · Mines left: {minesLeft}
           </Text>
@@ -243,33 +262,54 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
                   if (cell.state === 'revealed') bg = isDark ? '#1f2937' : '#f9fafb';
                   if (isHitMine) bg = '#ef4444';
                   return (
-                    <TouchableOpacity
-                      key={c}
-                      onPress={() => handleCellPress(r, c)}
-                      onLongPress={() => handleLongPress(r, c)}
-                      delayLongPress={300}
-                      disabled={isPaused || cell.state === 'revealed'}
-                      activeOpacity={0.7}
-                      style={{ width: CELL, height: CELL, borderWidth: 0.5, borderColor: isDark ? '#374151' : '#9ca3af', backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      {cell.state === 'flagged' ? (
-                        <Text style={{ fontSize: CELL * 0.55 }}>🚩</Text>
-                      ) : cell.state === 'revealed' && cell.isMine ? (
-                        <Text style={{ fontSize: CELL * 0.55 }}>💣</Text>
-                      ) : cell.state === 'revealed' && cell.adjacentMines > 0 ? (
-                        <Text style={{ fontSize: Math.max(9, CELL * 0.48), fontFamily: 'SpaceGrotesk-Bold', color: NUM_COLORS[cell.adjacentMines] }}>
-                          {cell.adjacentMines}
-                        </Text>
-                      ) : null}
-                    </TouchableOpacity>
+                    <View key={c} style={{ position: 'relative' }}>
+                      <TouchableOpacity
+                        onPress={() => handleCellPress(r, c)}
+                        onLongPress={() => handleLongPress(r, c)}
+                        delayLongPress={300}
+                        disabled={isPaused || cell.state === 'revealed'}
+                        activeOpacity={0.7}
+                        style={{ width: CELL, height: CELL, borderWidth: 0.5, borderColor: isDark ? '#374151' : '#9ca3af', backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        {cell.state === 'flagged' ? (
+                          <Text style={{ fontSize: CELL * 0.55 }}>🚩</Text>
+                        ) : cell.state === 'revealed' && cell.isMine ? (
+                          <Text style={{ fontSize: CELL * 0.55 }}>💣</Text>
+                        ) : cell.state === 'revealed' && cell.adjacentMines > 0 ? (
+                          <Text style={{ fontSize: Math.max(9, CELL * 0.48), fontFamily: 'SpaceGrotesk-Bold', color: NUM_COLORS[cell.adjacentMines] }}>
+                            {cell.adjacentMines}
+                          </Text>
+                        ) : null}
+                      </TouchableOpacity>
+                      {isHinted(r, c) && (
+                        <Animated.View pointerEvents="none" style={[
+                          { position: 'absolute', inset: 0, backgroundColor: 'rgba(99,102,241,0.5)' },
+                          hintOverlayStyle,
+                        ]} />
+                      )}
+                    </View>
                   );
                 })}
               </View>
             ))}
           </View>
-        </View>
-      </GenericGameScreen>
-      <ConfirmModal visible={showResetConfirm} title="Reset board?" message="Start this Minesweeper board fresh." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); setIsSolved(false); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
+
+          {toastMsg && (
+            <View style={{ backgroundColor: '#1e3a5f', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 8, alignSelf: 'center' }}>
+              <Text style={{ color: '#93c5fd', fontFamily: 'SpaceGrotesk-Medium', fontSize: 12, textAlign: 'center' }}>{toastMsg}</Text>
+            </View>
+          )}
+
+          {hint && (
+              <HintBox
+                description={hint.description}
+                subText="The highlighted cell has been revealed"
+                onDismiss={dismissHint}
+              />
+            )}
+          </View>
+        </GenericGameScreen>
+      <ConfirmModal visible={showResetConfirm} title="Reset board?" message="Start this Minesweeper board fresh." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); setIsSolved(false); dismissHint(); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
     </>
   );
 }

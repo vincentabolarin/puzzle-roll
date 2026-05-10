@@ -18,6 +18,7 @@ interface CachedDailyPuzzle {
   dailyPuzzleId: string;
   puzzleId: string;
   puzzleData: string; // JSON string
+  difficulty: Difficulty | null;
   validUntil: number; // timestamp
 }
 
@@ -58,6 +59,7 @@ class PuzzleCacheService {
         daily_puzzle_id TEXT NOT NULL,
         puzzle_id TEXT NOT NULL,
         puzzle_data TEXT NOT NULL,
+        difficulty TEXT,
         valid_until INTEGER NOT NULL,
         PRIMARY KEY (game_type, date)
       );
@@ -168,24 +170,25 @@ class PuzzleCacheService {
     dailyPuzzleId: string;
     puzzleId: string;
     puzzleData: unknown;
+    difficulty?: string;
   }): Promise<void> {
     if (!this.db) return;
 
-    // valid until next midnight UTC
     const tomorrow = new Date();
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     tomorrow.setUTCHours(0, 0, 0, 0);
 
     await this.db.runAsync(
       `INSERT OR REPLACE INTO daily_puzzles
-         (game_type, date, daily_puzzle_id, puzzle_id, puzzle_data, valid_until)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (game_type, date, daily_puzzle_id, puzzle_id, puzzle_data, difficulty, valid_until)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         params.gameType,
         params.date,
         params.dailyPuzzleId,
         params.puzzleId,
         JSON.stringify(params.puzzleData),
+        params.difficulty ?? null,
         tomorrow.getTime(),
       ]
     );
@@ -200,6 +203,7 @@ class PuzzleCacheService {
       daily_puzzle_id: string;
       puzzle_id: string;
       puzzle_data: string;
+      difficulty: Difficulty | null;
       valid_until: number;
     }>(
       `SELECT * FROM daily_puzzles
@@ -214,6 +218,7 @@ class PuzzleCacheService {
       dailyPuzzleId: row.daily_puzzle_id,
       puzzleId: row.puzzle_id,
       puzzleData: row.puzzle_data,
+      difficulty: row.difficulty ?? null,
       validUntil: row.valid_until,
     };
   }

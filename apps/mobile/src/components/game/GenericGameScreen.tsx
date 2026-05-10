@@ -182,8 +182,8 @@ const styles = StyleSheet.create({
   iconBtn: { padding: 8, minWidth: 40, minHeight: 40, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
   backText: { fontSize: 22 },
   pauseIcon: { fontSize: 16 },
-  boardContainer: { flex: 1 },
-  boardScroll: { alignItems: 'center', padding: 8, paddingBottom: 8 },
+  boardContainer: { flex: 1, paddingTop: 64 },
+  boardScroll: { alignItems: 'center', padding: 8, paddingTop: 64, paddingBottom: 8 },
   controlBar: { width: '100%', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   actionRow: {
     flexDirection: 'row', justifyContent: 'center',

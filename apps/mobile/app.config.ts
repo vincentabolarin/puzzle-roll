@@ -82,6 +82,12 @@ const config: ExpoConfig = {
   extra: {
     router: {},
 
+    apiUrl: process.env.EXPO_PUBLIC_API_URL,
+    admobInterstitialId: process.env.EXPO_PUBLIC_ADMOB_INTERSTITIAL_ID,
+    admobRewardedId: process.env.EXPO_PUBLIC_ADMOB_REWARDED_ID,
+    admobAndroidAppId: process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID,
+    admobIosAppId: process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID,
+
     eas: {
       projectId: process.env.EXPO_PUBLIC_PROJECT_ID,
     },

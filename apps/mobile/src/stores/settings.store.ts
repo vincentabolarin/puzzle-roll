@@ -9,6 +9,7 @@ interface SettingsState {
   soundEnabled: boolean;
   hapticsEnabled: boolean;
   autoRemoveNotes: boolean;
+  queensAutoMark: boolean;
   theme: ThemeOption;
   isHydrated: boolean;
 }
@@ -17,6 +18,7 @@ interface SettingsActions {
   setSoundEnabled: (enabled: boolean) => void;
   setHapticsEnabled: (enabled: boolean) => void;
   setAutoRemoveNotes: (enabled: boolean) => void;
+  setQueensAutoMark: (enabled: boolean) => void;
   setTheme: (theme: ThemeOption) => void;
   hydrateFromStorage: () => Promise<void>;
   persistToStorage: () => Promise<void>;
@@ -26,12 +28,14 @@ export const useSettingsStore = create<SettingsState & SettingsActions>((set, ge
   soundEnabled: true,
   hapticsEnabled: true,
   autoRemoveNotes: true,
+  queensAutoMark: true,
   theme: 'dark',
   isHydrated: false,
 
   setSoundEnabled: (enabled) => { set({ soundEnabled: enabled }); get().persistToStorage(); },
   setHapticsEnabled: (enabled) => { set({ hapticsEnabled: enabled }); get().persistToStorage(); },
   setAutoRemoveNotes: (enabled) => { set({ autoRemoveNotes: enabled }); get().persistToStorage(); },
+  setQueensAutoMark: (enabled) => { set({ queensAutoMark: enabled }); get().persistToStorage(); },
   setTheme: (theme) => { set({ theme }); get().persistToStorage(); },
 
   hydrateFromStorage: async () => {
@@ -43,6 +47,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>((set, ge
           soundEnabled: saved.soundEnabled ?? true,
           hapticsEnabled: saved.hapticsEnabled ?? true,
           autoRemoveNotes: saved.autoRemoveNotes ?? true,
+          queensAutoMark: saved.queensAutoMark ?? true,
           // Migrate old boolean darkMode -> ThemeOption
           theme: saved.theme ?? ((saved as Record<string, unknown>)['darkMode'] === false ? 'light' : 'dark'),
           isHydrated: true,
@@ -56,10 +61,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>((set, ge
   },
 
   persistToStorage: async () => {
-    const { soundEnabled, hapticsEnabled, autoRemoveNotes, theme } = get();
+    const { soundEnabled, hapticsEnabled, autoRemoveNotes, queensAutoMark, theme } = get();
     await AsyncStorage.setItem(
       SETTINGS_KEY,
-      JSON.stringify({ soundEnabled, hapticsEnabled, autoRemoveNotes, theme })
+      JSON.stringify({ soundEnabled, hapticsEnabled, autoRemoveNotes, queensAutoMark, theme })
     );
   },
 }));

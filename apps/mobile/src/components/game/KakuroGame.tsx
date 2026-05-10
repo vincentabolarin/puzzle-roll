@@ -17,6 +17,10 @@ import { playSound } from '../../services/sound.service';
 import GenericGameScreen from './GenericGameScreen';
 import ResumeModal from './ResumeModal';
 import ConfirmModal from '../ui/ConfirmModal';
+import { usePuzzleSolution } from '@/hooks/usePuzzleSolution';
+import { useHintHighlight } from '@/hooks/useHintHighlight';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import HintBox from '../ui/HintBox';
 
 interface KBlackCell { type: 'black'; acrossClue: number | null; downClue: number | null }
 interface KWhiteCell { type: 'white'; value: number }
@@ -40,10 +44,17 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const [showResume, setShowResume] = useState(false);
   const [savedData, setSavedData] = useState<SavedPuzzleProgress | null>(null);
   const [initialized, setInitialized] = useState(false);
-  const [solution, setSolution] = useState<{ values: Array<{ row: number; col: number; value: number }> } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [pressedDigit, setPressedDigit] = useState<number | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  const { loadSolution } = usePuzzleSolution<{ values: Array<{ row: number; col: number; value: number }> }>(puzzleId);
+
+  const { hint, blinkAnim, showHint, dismissHint, isHinted } = useHintHighlight();
+
+  const hintOverlayStyle = useAnimatedStyle(() => ({
+    opacity: blinkAnim.value,
+  }));
 
   if (!puzzleData || typeof (puzzleData as KakuroPuzzleData).size !== 'number') return null;
   const pd = puzzleData as KakuroPuzzleData;
@@ -66,7 +77,6 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     startSession({ puzzleId, gameType: GameType.KAKURO, difficulty: Difficulty.MEDIUM, isDaily, dailyPuzzleId, initialState: raw, initialElapsedSeconds: savedData?.elapsedSeconds ?? 0, initialHintsUsed: savedData?.hintsUsed ?? 0, initialHintsRemaining: savedData?.hintsRemaining ?? 3 });
     setInitialized(true);
   }
-  const loadSolution = useCallback(async () => { if (solution) return solution; try { const r = await apiClient.get<{ id: string; solution: typeof solution }>(`/puzzles/id/${puzzleId}/solution`); setSolution(r.solution); return r.solution; } catch { return null; } }, [puzzleId, solution]);
 
   useEffect(() => {
     if (!initialized || !session || session.isSolved) return;
@@ -142,6 +152,7 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       const newVals = { ...values }; const newNotes = { ...notes };
       if (digit === 0) { delete newVals[selected]; } else { newVals[selected] = digit; delete newNotes[selected]; }
       updateState({ ...gameState, values: newVals, notes: newNotes }, true);
+      dismissHint();
       await resolveWin(newVals);
     }
   }, [gameState, selected, isPaused, isSolved, values, notes, isNotesMode, lightImpact, updateState, session]);
@@ -150,15 +161,47 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
+    const pd = puzzleData as { grid: Array<Array<{ type: string; across?: number; down?: number }>> };
+
     for (const { row, col, value } of sol.values) {
-      if (!values[`${row},${col}`]) {
-        lightImpact(); playSound('hint');
-        const newVals = { ...values, [`${row},${col}`]: value }; const newNotes = { ...notes }; delete newNotes[`${row},${col}`];
-        updateState({ ...gameState, values: newVals, notes: newNotes }, true);
-        await resolveWin(newVals); return;
+      const key = `${row},${col}`;
+      if (values[key] === value) continue;
+
+      // Find which across/down clues govern this cell for the explanation
+      let acrossClue: number | null = null;
+      let downClue: number | null = null;
+      for (let c = col; c >= 0; c--) {
+        const cell = pd.grid[row]?.[c];
+        if (!cell) break;
+        if (cell.type === 'black') { acrossClue = cell.across ?? null; break; }
       }
+      for (let r = row; r >= 0; r--) {
+        const cell = pd.grid[r]?.[col];
+        if (!cell) break;
+        if (cell.type === 'black') { downClue = cell.down ?? null; break; }
+      }
+
+      const clueText = [
+        acrossClue != null ? `across clue ${acrossClue}` : null,
+        downClue != null ? `down clue ${downClue}` : null,
+      ].filter(Boolean).join(' and ');
+
+      const desc = `Place ${value} at row ${row + 1}, column ${col + 1}. ` +
+        (clueText
+          ? `It's the only digit that satisfies the ${clueText} without repeating in that run.`
+          : `It's the only digit that fits in that run without repeating.`);
+
+      lightImpact(); playSound('hint');
+      showHint({ row, col, description: desc });
+
+      // const newVals = { ...values, [key]: value };
+      const newNotes = { ...notes };
+      delete newNotes[key];
+      // updateState({ ...gameState, values: newVals, notes: newNotes }, true);
+      // await resolveWin(newVals);
+      return;
     }
-  }, [gameState, isPaused, values, notes, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
+  }, [gameState, isPaused, values, notes, puzzleData, useHint, showRewardedAd, loadSolution, lightImpact, updateState, showHint, session]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!gameState || !session) return null;
@@ -241,15 +284,31 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
                           ))}
                         </View>
                       ) : null}
+
+                      {isHinted(r, c) && (
+                        <Animated.View pointerEvents="none" style={[
+                            { position: 'absolute', inset: 0, backgroundColor: 'rgba(99,102,241,0.5)' },
+                            hintOverlayStyle,
+                          ]}
+                        />
+                      )}
                     </TouchableOpacity>
                   );
                 })}
               </View>
             ))}
           </View>
+
+          {hint && (
+            <HintBox
+              description={hint.description}
+              subText="Tap the highlighted cell to apply"
+              onDismiss={dismissHint}
+            />
+          )}
         </View>
       </GenericGameScreen>
-      <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All your entries and notes will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); setSelected(null); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
+      <ConfirmModal visible={showResetConfirm} title="Reset board?" message="All your entries and notes will be cleared." confirmLabel="Reset" confirmDanger onConfirm={() => { setShowResetConfirm(false); setSelected(null); dismissHint(); updateState(buildInitial()); }} onCancel={() => setShowResetConfirm(false)} />
     </>
   );
 }
