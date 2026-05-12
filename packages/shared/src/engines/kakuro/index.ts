@@ -385,7 +385,7 @@ export function getHint(
 ): KakuroHintResult | null {
   for (const { row, col, value } of solution.values) {
     const cell = gameState.board[row][col] as KakuroWhiteCell;
-    if (cell.value === 0) {
+    if (cell.value !== value) {
       const newBoard = gameState.board.map((r, ri) =>
         r.map((c, ci): KakuroCell => {
           if (ri === row && ci === col) {
