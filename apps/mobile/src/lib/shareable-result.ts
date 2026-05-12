@@ -14,11 +14,11 @@ const GAME_EMOJI: Record<GameType, string> = {
   [GameType.HITORI]: '⬛',
 };
 
-const DIFFICULTY_STARS: Record<Difficulty, string> = {
-  [Difficulty.EASY]: '⭐',
-  [Difficulty.MEDIUM]: '⭐⭐',
-  [Difficulty.HARD]: '⭐⭐⭐',
-  [Difficulty.EXPERT]: '⭐⭐⭐⭐',
+const DIFFICULTY_DISPLAY: Record<Difficulty, string> = {
+  [Difficulty.EASY]:   '🟢 Easy',
+  [Difficulty.MEDIUM]: '🟡 Medium',
+  [Difficulty.HARD]:   '🟠 Hard',
+  [Difficulty.EXPERT]: '🔴 Expert',
 };
 
 // Update these with your real store URLs before launch
@@ -46,20 +46,23 @@ export function generateShareableResult(params: {
   date: string;
   isDaily: boolean;
   streak?: number;
+  serialNumber?: number;
 }): string {
-  const { gameType, difficulty, elapsedSeconds, hintsUsed, date, isDaily, streak } = params;
+  const { gameType, difficulty, elapsedSeconds, hintsUsed, date, isDaily, streak, serialNumber } = params;
 
   const gameEmoji = GAME_EMOJI[gameType];
   const gameName = gameType.charAt(0).toUpperCase() + gameType.slice(1).replace(/_/g, ' ');
-  const stars = DIFFICULTY_STARS[difficulty];
+  const diffDisplay = DIFFICULTY_DISPLAY[difficulty];
   const time = formatTime(elapsedSeconds);
   const bar = buildPerformanceBar(hintsUsed);
   const hintText = hintsUsed === 0 ? 'No hints' : `${hintsUsed} hint${hintsUsed > 1 ? 's' : ''}`;
-  const prefix = isDaily ? `Daily ${date}` : difficulty;
+  const prefix = isDaily
+    ? (serialNumber ? `Daily #${serialNumber} · ${date}` : `Daily ${date}`)
+    : diffDisplay;
 
   const lines = [
     `${gameEmoji} Puzzle Roll — ${gameName}`,
-    `${prefix} ${stars}`,
+    prefix,
     bar,
     `⏱️ ${time} | ${hintText}`,
   ];

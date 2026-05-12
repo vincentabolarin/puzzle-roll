@@ -59,7 +59,8 @@ class SyncService {
             dailyPuzzleId: string;
             date: string;
             gameType: string;
-            puzzle: { id: string; puzzleData: unknown };
+            serialNumber?: number;
+            puzzle: { id: string; puzzleData: unknown; difficulty?: string };
           }>(`/puzzles/${gameType}/daily`);
 
           await puzzleCache.cacheDailyPuzzle({
@@ -68,6 +69,8 @@ class SyncService {
             dailyPuzzleId: result.dailyPuzzleId,
             puzzleId: result.puzzle.id,
             puzzleData: result.puzzle.puzzleData,
+            difficulty: result.puzzle.difficulty,
+            serialNumber: result.serialNumber,
           });
         } catch {
           // Silently fall back to cached version

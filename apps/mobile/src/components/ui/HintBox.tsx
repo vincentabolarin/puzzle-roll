@@ -48,6 +48,6 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   icon: { fontSize: 14, marginTop: 1 },
-  description: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 13, lineHeight: 19 },
+  description: { fontFamily: 'SpaceGrotesk-Medium', fontSize: 13, lineHeight: 19, flexShrink: 1 },
   subText: { fontFamily: 'SpaceGrotesk-Regular', fontSize: 11, marginLeft: 22 },
 });

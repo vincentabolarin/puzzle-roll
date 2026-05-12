@@ -22,6 +22,7 @@ export class PuzzlesService {
       dailyPuzzleId: daily.id,
       date: daily.date,
       gameType: daily.gameType,
+      serialNumber: daily.serialNumber,
       puzzle: {
         id: daily.puzzle.id,
         gameType: daily.puzzle.gameType,

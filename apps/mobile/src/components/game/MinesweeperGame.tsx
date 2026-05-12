@@ -42,7 +42,7 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
   const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, mediumImpact, successNotification, errorNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
-  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const { saveProgress, loadProgress, clearProgress, markCompleted, saveDailyResult } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const queryClient = useQueryClient();
   const t = useAppTheme();
@@ -86,7 +86,7 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
   }
 
   useEffect(() => {
-    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); setShowResume(true); } else startFresh(); }
+    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); if (isDaily) { continueFromSave(); } else { setShowResume(true); } } else startFresh(); }
     init();
   }, [puzzleId]);
 
@@ -148,6 +148,7 @@ export default function MinesweeperGame({ puzzleId, puzzleData, isDaily, dailyPu
     const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
     const shareable = generateShareableResult({ gameType: GameType.MINESWEEPER, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
     submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+    if (isDaily && dailyPuzzleId) saveDailyResult(dailyPuzzleId, shareable);
     await markCompleted(puzzleId, isDaily);
     await puzzleCache.markCompleted(puzzleId, GameType.MINESWEEPER);
     await showInterstitialIfDue();

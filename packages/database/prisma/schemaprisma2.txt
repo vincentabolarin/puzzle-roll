@@ -130,12 +130,11 @@ model GamePuzzle {
 // ─── Daily Puzzle ─────────────────────────────────────────────────────────────
 
 model DailyPuzzle {
-  id           String   @id @default(cuid())
-  gameType     GameType
-  date         String
-  puzzleId     String
-  serialNumber Int      @default(0)
-  createdAt    DateTime @default(now())
+  id        String   @id @default(cuid())
+  gameType  GameType
+  date      String
+  puzzleId  String
+  createdAt DateTime @default(now())
 
   puzzle      GamePuzzle     @relation(fields: [puzzleId], references: [id])
   completions GameCompletion[]

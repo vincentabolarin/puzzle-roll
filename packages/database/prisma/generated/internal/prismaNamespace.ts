@@ -1193,6 +1193,7 @@ export const DailyPuzzleScalarFieldEnum = {
   gameType: 'gameType',
   date: 'date',
   puzzleId: 'puzzleId',
+  serialNumber: 'serialNumber',
   createdAt: 'createdAt'
 } as const
 

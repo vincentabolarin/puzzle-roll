@@ -125,7 +125,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const { autoRemoveNotes } = useSettingsStore();
   const { enqueue } = useOfflineQueueStore();
   const queryClient = useQueryClient();
-  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const { saveProgress, loadProgress, clearProgress, markCompleted, saveDailyResult } = usePuzzleProgressStore();
   const t = useAppTheme();
   const isDark = t.background !== '#f9fafb';
 
@@ -146,7 +146,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   }));
 
   useEffect(() => {
-    async function init() { const saved = await loadProgress(puzzleId); if (saved) { setSavedData(saved); setShowResumeModal(true); } else startFresh(); }
+    async function init() { const saved = await loadProgress(puzzleId); if (saved) { setSavedData(saved); if (isDaily) { continueFromSave(); } else { setShowResumeModal(true); } } else startFresh(); }
     init();
   }, [puzzleId]);
 
@@ -214,14 +214,16 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
     const shareable = generateShareableResult({ gameType: GameType.SUDOKU, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
     submitCompletion({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+    if (isDaily && dailyPuzzleId) saveDailyResult(dailyPuzzleId, shareable);
     await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.SUDOKU); await showInterstitialIfDue();
   }
 
   const handleCellPress = useCallback((row: number, col: number) => {
     if (!gameState || session?.isSolved || isPaused) return;
     lightImpact(); playSound('cell_tap');
+    if (isHinted(row, col)) dismissHint();
     updateState({ ...gameState, selectedCell: { row, col } }, false);
-  }, [gameState, session?.isSolved, isPaused, lightImpact, updateState]);
+  }, [gameState, session?.isSolved, isPaused, lightImpact, updateState, isHinted, dismissHint]);
 
   const handleDigitPress = useCallback(async (digit: SudokuDigit) => {
     if (!gameState || !selectedCell || session?.isSolved || isPaused) return;
@@ -316,7 +318,6 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
 
     updateState({ ...hint.revealedState, board: cleanBoard } as SudokuEngine.SudokuGameState & { board: ExtendedBoard });
-    dismissHint();
     await triggerWin(cleanBoard, sol?.grid);
   }, [gameState, isPaused, useHint, showRewardedAd, loadSolution, lightImpact, updateState, showHint]);
 
@@ -457,7 +458,7 @@ export default function SudokuGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
        {hint && (
         <HintBox
           description={hint.description}
-          subText="Tap the highlighted cell to apply"
+          subText="Select the highlighted cell, then type the correct digit"
           onDismiss={dismissHint}
         />
       )}

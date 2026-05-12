@@ -49,7 +49,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const { session, startSession, updateState, undo, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
-  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const { saveProgress, loadProgress, clearProgress, markCompleted, saveDailyResult } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const queryClient = useQueryClient();
   const t = useAppTheme();
@@ -98,7 +98,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   }
 
   useEffect(() => {
-    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); setShowResume(true); } else startFresh(); }
+    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); if (isDaily) { continueFromSave(); } else { setShowResume(true); } } else startFresh(); }
     init();
   }, [puzzleId]);
 
@@ -177,6 +177,7 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.QUEENS, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+      if (isDaily && dailyPuzzleId) saveDailyResult(dailyPuzzleId, shareable);
       await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.QUEENS); await showInterstitialIfDue();
     }
   }
@@ -275,6 +276,8 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
 
   const handleHint = useCallback(async () => {
     if (!gameState || isPaused) return;
+    // Yield to UI thread before computing
+    await new Promise(resolve => setTimeout(resolve, 0));
     const currentGameState = gameState;
     const canUse = useHint();
     if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
@@ -285,6 +288,39 @@ export default function QueensGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     for (let r = 0; r < size; r++)
       for (let c = 0; c < size; c++)
         if (currentGameState.board[r][c] === 'queen') placedQueens.push({ r, c });
+
+    // If board is fully placed but invalid, explain the conflict
+    if (placedQueens.length === size && !checkSolved(currentGameState.board)) {
+      for (let i = 0; i < placedQueens.length; i++) {
+        for (let j = i + 1; j < placedQueens.length; j++) {
+          const a = placedQueens[i], b = placedQueens[j];
+          if (Math.abs(a.r - b.r) <= 1 && Math.abs(a.c - b.c) <= 1) {
+            lightImpact(); playSound('hint');
+            setHintType('queen');
+            showHint({ row: b.r, col: b.c, description: `The queens at row ${a.r + 1} col ${a.c + 1} and row ${b.r + 1} col ${b.c + 1} are diagonally or directly adjacent — queens cannot touch. Remove one of them.` });
+            return;
+          }
+          if (a.r === b.r) {
+            lightImpact(); playSound('hint');
+            setHintType('queen');
+            showHint({ row: b.r, col: b.c, description: `Two queens share row ${a.r + 1}. Each row can only have one queen.` });
+            return;
+          }
+          if (a.c === b.c) {
+            lightImpact(); playSound('hint');
+            setHintType('queen');
+            showHint({ row: b.r, col: b.c, description: `Two queens share column ${a.c + 1}. Each column can only have one queen.` });
+            return;
+          }
+          if (regions[a.r][a.c] === regions[b.r][b.c]) {
+            lightImpact(); playSound('hint');
+            setHintType('queen');
+            showHint({ row: b.r, col: b.c, description: `Two queens are in the same region. Each region can only have one queen.` });
+            return;
+          }
+        }
+      }
+    }
 
     const placedRows = new Set(placedQueens.map(q => q.r));
     const placedCols = new Set(placedQueens.map(q => q.c));

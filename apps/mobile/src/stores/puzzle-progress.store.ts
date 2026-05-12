@@ -5,6 +5,7 @@ import { GameType, Difficulty } from '@puzzle-roll/shared';
 const PROGRESS_KEY_PREFIX = 'proll_progress_';
 const COMPLETED_KEY = 'proll_completed';
 const DAILY_COMPLETED_KEY = 'proll_daily_completed';
+const DAILY_RESULT_KEY_PREFIX = 'proll_daily_result_';
 
 export interface SavedPuzzleProgress {
   puzzleId: string;
@@ -35,6 +36,8 @@ interface PuzzleProgressActions {
   /** Returns true only if completed via the daily route */
   isDailyCompleted: (puzzleId: string) => boolean;
   isInProgress: (puzzleId: string) => boolean;
+  saveDailyResult: (dailyPuzzleId: string, shareableResult: string) => Promise<void>;
+  getDailyResult: (dailyPuzzleId: string) => Promise<string | null>;
   /** Called on login/logout — clears in-memory state and AsyncStorage so it re-hydrates for the new user */
   resetForUserChange: () => Promise<void>;
 }
@@ -107,6 +110,20 @@ export const usePuzzleProgressStore = create<PuzzleProgressState & PuzzleProgres
     isDailyCompleted: (puzzleId) => get().dailyCompletedPuzzleIds.has(puzzleId),
     isInProgress: (puzzleId) =>
       !get().completedPuzzleIds.has(puzzleId) && get().inProgressPuzzleIds.has(puzzleId),
+
+    saveDailyResult: async (dailyPuzzleId, shareableResult) => {
+      try {
+        await AsyncStorage.setItem(`${DAILY_RESULT_KEY_PREFIX}${dailyPuzzleId}`, shareableResult);
+      } catch {}
+    },
+
+    getDailyResult: async (dailyPuzzleId) => {
+      try {
+        return await AsyncStorage.getItem(`${DAILY_RESULT_KEY_PREFIX}${dailyPuzzleId}`);
+      } catch {
+        return null;
+      }
+    },
 
     resetForUserChange: async () => {
       set({ completedPuzzleIds: new Set(), dailyCompletedPuzzleIds: new Set(), inProgressPuzzleIds: new Set() });

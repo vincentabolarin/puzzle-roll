@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'r
 import Svg, { Line } from 'react-native-svg';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/query-client';
-import { GameType, Difficulty } from '@puzzle-roll/shared';
+import { GameType, Difficulty, KakuroEngine } from '@puzzle-roll/shared';
 import { useGameSessionStore } from '../../stores/game-session.store';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useAdMob } from '../../hooks/useAdMob';
@@ -34,7 +34,7 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const queryClient = useQueryClient();
-  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const { saveProgress, loadProgress, clearProgress, markCompleted, saveDailyResult } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
@@ -65,7 +65,7 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
   function buildInitial(): KakuroState { return { values: {}, notes: {}, isNotesMode: false }; }
 
   useEffect(() => {
-    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); setShowResume(true); } else startFresh(); }
+    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); if (isDaily) { continueFromSave(); } else { setShowResume(true); } } else startFresh(); }
     init();
   }, [puzzleId]);
 
@@ -135,6 +135,7 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
       const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.KAKURO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+      if (isDaily && dailyPuzzleId) saveDailyResult(dailyPuzzleId, shareable);
       await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.KAKURO); await showInterstitialIfDue();
     }
   }
@@ -161,47 +162,51 @@ export default function KakuroGame({ puzzleId, puzzleData, isDaily, dailyPuzzleI
     if (!gameState || isPaused) return;
     const canUse = useHint(); if (!canUse) { const g = await showRewardedAd(); if (!g) return; }
     const sol = await loadSolution(); if (!sol) return;
-    const pd = puzzleData as { grid: Array<Array<{ type: string; across?: number; down?: number }>> };
 
-    for (const { row, col, value } of sol.values) {
-      const key = `${row},${col}`;
-      if (values[key] === value) continue;
+    const currentBoard: KakuroEngine.KakuroCell[][] = pd.grid.map((row, r) =>
+      row.map((cell, c): KakuroEngine.KakuroCell => {
+        if ((cell as KakuroEngine.KakuroBlackCell).type === 'black') return { ...cell } as KakuroEngine.KakuroBlackCell;
+        const v = (values[`${r},${c}`] ?? 0) as KakuroEngine.KakuroDigit | 0;
+        return { ...(cell as KakuroEngine.KakuroWhiteCell), value: v };
+      })
+    );
 
-      // Find which across/down clues govern this cell for the explanation
-      let acrossClue: number | null = null;
-      let downClue: number | null = null;
-      for (let c = col; c >= 0; c--) {
-        const cell = pd.grid[row]?.[c];
-        if (!cell) break;
-        if (cell.type === 'black') { acrossClue = cell.across ?? null; break; }
-      }
-      for (let r = row; r >= 0; r--) {
-        const cell = pd.grid[r]?.[col];
-        if (!cell) break;
-        if (cell.type === 'black') { downClue = cell.down ?? null; break; }
-      }
+    const hint = KakuroEngine.getHint({ board: currentBoard, selectedCell: null }, sol as KakuroEngine.KakuroSolution);
+    if (!hint || !hint.position) return;
 
-      const clueText = [
-        acrossClue != null ? `across clue ${acrossClue}` : null,
-        downClue != null ? `down clue ${downClue}` : null,
-      ].filter(Boolean).join(' and ');
+    const { row, col } = hint.position;
+    const targetValue = (sol as KakuroEngine.KakuroSolution).values.find(v => v.row === row && v.col === col)?.value ?? 0;
+    const isWrong = (values[`${row},${col}`] ?? 0) !== 0;
 
-      const desc = `Place ${value} at row ${row + 1}, column ${col + 1}. ` +
-        (clueText
-          ? `It's the only digit that satisfies the ${clueText} without repeating in that run.`
-          : `It's the only digit that fits in that run without repeating.`);
-
-      lightImpact(); playSound('hint');
-      showHint({ row, col, description: desc });
-
-      // const newVals = { ...values, [key]: value };
-      const newNotes = { ...notes };
-      delete newNotes[key];
-      // updateState({ ...gameState, values: newVals, notes: newNotes }, true);
-      // await resolveWin(newVals);
-      return;
+    let acrossClue: number | null = null;
+    for (let c = col - 1; c >= 0; c--) {
+      const cell = pd.grid[row][c] as KakuroEngine.KakuroBlackCell;
+      if (cell.type === 'black') { acrossClue = cell.acrossClue; break; }
     }
-  }, [gameState, isPaused, values, notes, puzzleData, useHint, showRewardedAd, loadSolution, lightImpact, updateState, showHint, session]);
+    let downClue: number | null = null;
+    for (let r = row - 1; r >= 0; r--) {
+      const cell = pd.grid[r][col] as KakuroEngine.KakuroBlackCell;
+      if (cell.type === 'black') { downClue = cell.downClue; break; }
+    }
+
+    const clueText = [
+      acrossClue != null ? `across sum ${acrossClue}` : null,
+      downClue != null ? `down sum ${downClue}` : null,
+    ].filter(Boolean).join(' and ');
+
+    const desc = isWrong
+      ? `Row ${row + 1}, column ${col + 1} is incorrect. ${clueText ? `The ${clueText} constraint means` : 'The run constraint means'} this cell must be ${targetValue}.`
+      : `Place ${targetValue} at row ${row + 1}, column ${col + 1}. ${clueText ? `It satisfies the ${clueText} without repeating in that run.` : "It's the only digit that fits without repeating."}`;
+
+    lightImpact(); playSound('hint');
+    showHint({ row, col, description: desc });
+    setSelected(`${row},${col}`);
+
+    const newNotes = { ...notes };
+    delete newNotes[`${row},${col}`];
+    updateState({ ...gameState, values: { ...values, [`${row},${col}`]: targetValue }, notes: newNotes }, true);
+    await resolveWin({ ...values, [`${row},${col}`]: targetValue });
+  }, [gameState, isPaused, values, notes, pd, useHint, showRewardedAd, loadSolution, lightImpact, updateState, showHint, session]);
 
   if (!initialized) return <ResumeModal visible={showResume} elapsedSeconds={savedData?.elapsedSeconds ?? 0} onContinue={() => { setShowResume(false); continueFromSave(); }} onRestart={() => { setShowResume(false); clearProgress(puzzleId); startFresh(); }} />;
   if (!gameState || !session) return null;

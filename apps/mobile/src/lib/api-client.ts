@@ -125,8 +125,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     };
 
     try {
-      const json = await response.json() as { data: ApiError };
-      errorBody = json.data ?? errorBody;
+      const json = await response.json() as { data?: ApiError } & Partial<ApiError>;
+      errorBody = json.data ?? (json.message ? (json as ApiError) : errorBody);
     } catch {}
 
     console.log(`[API ERROR] [${requestId}]`, {

@@ -40,7 +40,7 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const queryClient = useQueryClient();
-  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const { saveProgress, loadProgress, clearProgress, markCompleted, saveDailyResult } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
@@ -73,7 +73,7 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
   }
 
   useEffect(() => {
-    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); setShowResume(true); } else startFresh(); }
+    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); if (isDaily) { continueFromSave(); } else { setShowResume(true); } } else startFresh(); }
     init();
   }, [puzzleId]);
 
@@ -131,6 +131,7 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
       const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.FUTOSHIKI, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+      if (isDaily && dailyPuzzleId) saveDailyResult(dailyPuzzleId, shareable);
       await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.FUTOSHIKI); await showInterstitialIfDue();
     }
   }
@@ -196,11 +197,9 @@ export default function FutoshikiGame({ puzzleId, puzzleData, isDaily, dailyPuzz
       ? `Place ${value} at row ${row + 1}, column ${col + 1}. It satisfies the inequality constraint${relevant.length > 1 ? 's' : ''} on that cell and doesn't repeat in the row or column.`
       : `Place ${value} at row ${row + 1}, column ${col + 1}. It's the only digit that fits without repeating in the row or column.`;
     showHint({ row, col, description: desc });
-
-    // const newState = { ...gameState, ...(hint.revealedState as Partial<FutoshikiState>) };
-    // updateState(newState, true);
-    // revalidate(newState.board);
-    // await resolveWin(newState.board);
+    updateState({ ...(hint.revealedState as FutoshikiState), selectedCell: { row, col } }, true);
+    revalidate((hint.revealedState as FutoshikiState).board);
+    await resolveWin((hint.revealedState as FutoshikiState).board);
   }, [gameState, isPaused, given, useHint, showRewardedAd, loadSolution, lightImpact, updateState, session]);
 
   function getHConSymbol(r: number, c: number): string | null {

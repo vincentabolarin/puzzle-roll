@@ -1,7 +1,8 @@
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { router } from 'expo-router';
 import { GameType } from '@puzzle-roll/shared';
+import { useSharedValue, withTiming, runOnJS } from 'react-native-reanimated';
 import { useAppTheme } from '../../hooks/useAppTheme';
 import GameTimer from './GameTimer';
 import HintButton from './HintButton';
@@ -63,6 +64,18 @@ export default function GenericGameScreen({
   const actionBg = isDark ? '#1f2937' : '#f3f4f6';
   const iconColor = isDark ? '#e5e7eb' : '#374151';
 
+  const [hintCooldown, setHintCooldown] = useState(false);
+  const cooldownProgress = useSharedValue(0);
+
+  const handleGetHint = () => {
+    onGetHint();
+    setHintCooldown(true);
+    cooldownProgress.value = 0;
+    cooldownProgress.value = withTiming(1, { duration: 3000 }, (finished) => {
+      if (finished) runOnJS(setHintCooldown)(false);
+    });
+  };
+
   const controlBar = (
     <View style={styles.controlBar}>
       <View style={styles.actionRow}>
@@ -79,7 +92,7 @@ export default function GenericGameScreen({
 
         {extraControls}
 
-        <HintButton hintsRemaining={hintsRemaining} onPress={onGetHint} />
+        <HintButton hintsRemaining={hintsRemaining} onPress={handleGetHint} disabled={hintCooldown} cooldownProgress={cooldownProgress} />
 
         <TouchableOpacity
           onPress={onReset}

@@ -61,7 +61,7 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
   const { session, startSession, updateState, markSolved, pauseTimer, resumeTimer, useHint } = useGameSessionStore();
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
-  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const { saveProgress, loadProgress, clearProgress, markCompleted, saveDailyResult } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const queryClient = useQueryClient();
   const t = useAppTheme();
@@ -104,7 +104,7 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
             }
           }
         }
-        if (compatible) { setSavedData(s); setShowResume(true); }
+        if (compatible) { setSavedData(s); if (isDaily) { continueFromSave(); } else { setShowResume(true); } }
         else { await clearProgress(puzzleId); startFresh(); }
       } else { startFresh(); }
     }
@@ -178,6 +178,7 @@ export default function TangoGame({ puzzleId, puzzleData, isDaily, dailyPuzzleId
       const hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.TANGO, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+      if (isDaily && dailyPuzzleId) saveDailyResult(dailyPuzzleId, shareable);
       await markCompleted(puzzleId, isDaily);
       await puzzleCache.markCompleted(puzzleId, GameType.TANGO);
       await showInterstitialIfDue();

@@ -44,7 +44,7 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const queryClient = useQueryClient();
-  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const { saveProgress, loadProgress, clearProgress, markCompleted, saveDailyResult } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
@@ -77,7 +77,7 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
   }
 
   useEffect(() => {
-    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); setShowResume(true); } else startFresh(); }
+    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); if (isDaily) { continueFromSave(); } else { setShowResume(true); } } else startFresh(); }
     init();
   }, [puzzleId]);
 
@@ -118,6 +118,7 @@ export default function LightUpGame({ puzzleId, puzzleData, isDaily, dailyPuzzle
       const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
       const shareable = generateShareableResult({ gameType: GameType.LIGHT_UP, difficulty: session?.difficulty ?? Difficulty.MEDIUM, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
       submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+      if (isDaily && dailyPuzzleId) saveDailyResult(dailyPuzzleId, shareable);
       await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.LIGHT_UP); await showInterstitialIfDue();
     }
   }

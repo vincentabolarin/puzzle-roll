@@ -19,6 +19,7 @@ interface CachedDailyPuzzle {
   puzzleId: string;
   puzzleData: string; // JSON string
   difficulty: Difficulty | null;
+  serialNumber: number;
   validUntil: number; // timestamp
 }
 
@@ -89,6 +90,11 @@ class PuzzleCacheService {
         value TEXT NOT NULL
       );
     `);
+
+    // Migrations — safe to run repeatedly
+    await this.db.execAsync(`
+      ALTER TABLE daily_puzzles ADD COLUMN serial_number INTEGER NOT NULL DEFAULT 0;
+    `).catch(() => {}); // column may already exist
   }
 
   // ─── Puzzles ──────────────────────────────────────────────────────────────
@@ -171,6 +177,7 @@ class PuzzleCacheService {
     puzzleId: string;
     puzzleData: unknown;
     difficulty?: string;
+    serialNumber?: number;
   }): Promise<void> {
     if (!this.db) return;
 
@@ -180,8 +187,8 @@ class PuzzleCacheService {
 
     await this.db.runAsync(
       `INSERT OR REPLACE INTO daily_puzzles
-         (game_type, date, daily_puzzle_id, puzzle_id, puzzle_data, difficulty, valid_until)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (game_type, date, daily_puzzle_id, puzzle_id, puzzle_data, difficulty, serial_number, valid_until)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         params.gameType,
         params.date,
@@ -189,6 +196,7 @@ class PuzzleCacheService {
         params.puzzleId,
         JSON.stringify(params.puzzleData),
         params.difficulty ?? null,
+        params.serialNumber ?? 0,
         tomorrow.getTime(),
       ]
     );
@@ -204,6 +212,7 @@ class PuzzleCacheService {
       puzzle_id: string;
       puzzle_data: string;
       difficulty: Difficulty | null;
+      serial_number: number;
       valid_until: number;
     }>(
       `SELECT * FROM daily_puzzles
@@ -219,6 +228,7 @@ class PuzzleCacheService {
       puzzleId: row.puzzle_id,
       puzzleData: row.puzzle_data,
       difficulty: row.difficulty ?? null,
+      serialNumber: row.serial_number ?? 0,
       validUntil: row.valid_until,
     };
   }

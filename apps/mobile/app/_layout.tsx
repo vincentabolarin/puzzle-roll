@@ -20,6 +20,8 @@ import { usePushNotifications } from '../src/hooks/usePushNotifications';
 import { missingVars } from '../src/lib/env';
 import { hasSeenOnboarding } from './onboarding';
 import { useGdprConsent } from '@/hooks/useGdprConsent';
+import { useProgressMergeStore } from '../src/stores/progress-merge.store';
+import ProgressMergeModal from '@/components/ui/ProgressMergeModal';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -152,6 +154,8 @@ function RootLayout() {
     }
   }, [isReady, onboardingDone]);
 
+  const { pending: mergePending } = useProgressMergeStore();
+
   const resolvedTheme: ResolvedTheme =
     theme === 'system'
       ? (systemColorScheme === 'light' ? 'light' : 'dark')
@@ -207,6 +211,16 @@ function RootLayout() {
               </Stack>
             )}
           </QueryClientProvider>
+          {mergePending && (
+            <ProgressMergeModal
+              visible
+              localCount={mergePending.localCount}
+              cloudCount={mergePending.cloudCount}
+              onKeepLocal={mergePending.onKeepLocal}
+              onKeepCloud={mergePending.onKeepCloud}
+              onMergeBoth={mergePending.onMergeBoth}
+            />
+          )}
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </ThemeContext.Provider>

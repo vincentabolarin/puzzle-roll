@@ -2,6 +2,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { Difficulty, GameType } from '@puzzle-roll/shared';
 import { apiClient } from '../../../src/lib/api-client';
@@ -9,6 +10,8 @@ import { puzzleCache } from '../../../src/services/puzzle-cache.service';
 import { useAppTheme } from '../../../src/hooks/useAppTheme';
 import { GAME_REGISTRY } from '@/lib/game-registry';
 import { useAuthStore } from '@/stores/auth.store';
+import { usePuzzleProgressStore } from '@/stores/puzzle-progress.store';
+import DailyResultModal from '@/components/ui/DailyResultModal';
 
 function ErrorFallback({ resetErrorBoundary }: { resetErrorBoundary: () => void }) {
   const t = useAppTheme();
@@ -28,6 +31,9 @@ export default function DailyPuzzleScreen() {
   const today = new Date().toISOString().slice(0, 10);
 
   const { user } = useAuthStore();
+  const { isDailyCompleted, getDailyResult } = usePuzzleProgressStore();
+  const [priorResult, setPriorResult] = useState<string | null>(null);
+  const [showResultModal, setShowResultModal] = useState(false);
 
   if (!user || user.isAnonymous) {
     return (
@@ -65,16 +71,17 @@ export default function DailyPuzzleScreen() {
           puzzleId: cached.puzzleId,
           puzzleData: JSON.parse(cached.puzzleData),
           difficulty: cached.difficulty ?? undefined,
+          serialNumber: cached.serialNumber ?? 0,
         };
       }
       const result = await apiClient.get<{
         dailyPuzzleId: string;
+        serialNumber?: number;
         puzzle: { id: string; puzzleData: unknown; difficulty: Difficulty };
       }>(`/puzzles/${gameType}/daily`);
       if (!result.puzzle || result.puzzle.puzzleData == null) {
         throw new Error('Daily puzzle data unavailable');
       }
-      // Cache with difficulty for next time
       await puzzleCache.cacheDailyPuzzle({
         gameType: gameType as GameType,
         date: today,
@@ -82,12 +89,14 @@ export default function DailyPuzzleScreen() {
         puzzleId: result.puzzle.id,
         puzzleData: result.puzzle.puzzleData,
         difficulty: result.puzzle.difficulty,
+        serialNumber: result.serialNumber,
       });
       return {
         dailyPuzzleId: result.dailyPuzzleId,
         puzzleId: result.puzzle.id,
         puzzleData: result.puzzle.puzzleData,
         difficulty: result.puzzle.difficulty,
+        serialNumber: result.serialNumber ?? 0,
       };
     },
     enabled: !!gameType,
@@ -95,6 +104,16 @@ export default function DailyPuzzleScreen() {
 
   const gt = (gameType ?? '') as GameType;
   const GameComponent = GAME_REGISTRY[gt];
+
+  useEffect(() => {
+    if (!data?.dailyPuzzleId) return;
+    if (isDailyCompleted(data.dailyPuzzleId)) {
+      getDailyResult(data.dailyPuzzleId).then((result) => {
+        setPriorResult(result);
+        setShowResultModal(true);
+      });
+    }
+  }, [data?.dailyPuzzleId]);
 
   if (isLoading) {
     return (
@@ -127,8 +146,16 @@ export default function DailyPuzzleScreen() {
           isDaily
           dailyPuzzleId={data.dailyPuzzleId}
           difficulty={data.difficulty}
+          puzzleNumber={data.serialNumber || undefined}
         />
       </ErrorBoundary>
+      {showResultModal && priorResult && (
+        <DailyResultModal
+          visible
+          shareableResult={priorResult}
+          onClose={() => { setShowResultModal(false); router.back(); }}
+        />
+      )}
     </SafeAreaView>
   );
 }

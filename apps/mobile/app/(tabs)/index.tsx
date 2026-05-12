@@ -226,7 +226,7 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View>
             <Text style={[styles.appTitle, { color: t.textPrimary }]}>Puzzle Roll</Text>
-            <Text style={[styles.appSub, { color: t.textMuted }]}>10 daily logic games</Text>
+            <Text style={[styles.appSub, { color: t.textMuted }]}>Daily logic games</Text>
           </View>
           <Text style={styles.headerEmoji}>🎲</Text>
         </View>

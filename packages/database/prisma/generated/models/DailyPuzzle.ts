@@ -20,8 +20,18 @@ export type DailyPuzzleModel = runtime.Types.Result.DefaultSelection<Prisma.$Dai
 
 export type AggregateDailyPuzzle = {
   _count: DailyPuzzleCountAggregateOutputType | null
+  _avg: DailyPuzzleAvgAggregateOutputType | null
+  _sum: DailyPuzzleSumAggregateOutputType | null
   _min: DailyPuzzleMinAggregateOutputType | null
   _max: DailyPuzzleMaxAggregateOutputType | null
+}
+
+export type DailyPuzzleAvgAggregateOutputType = {
+  serialNumber: number | null
+}
+
+export type DailyPuzzleSumAggregateOutputType = {
+  serialNumber: number | null
 }
 
 export type DailyPuzzleMinAggregateOutputType = {
@@ -29,6 +39,7 @@ export type DailyPuzzleMinAggregateOutputType = {
   gameType: $Enums.GameType | null
   date: string | null
   puzzleId: string | null
+  serialNumber: number | null
   createdAt: Date | null
 }
 
@@ -37,6 +48,7 @@ export type DailyPuzzleMaxAggregateOutputType = {
   gameType: $Enums.GameType | null
   date: string | null
   puzzleId: string | null
+  serialNumber: number | null
   createdAt: Date | null
 }
 
@@ -45,16 +57,26 @@ export type DailyPuzzleCountAggregateOutputType = {
   gameType: number
   date: number
   puzzleId: number
+  serialNumber: number
   createdAt: number
   _all: number
 }
 
+
+export type DailyPuzzleAvgAggregateInputType = {
+  serialNumber?: true
+}
+
+export type DailyPuzzleSumAggregateInputType = {
+  serialNumber?: true
+}
 
 export type DailyPuzzleMinAggregateInputType = {
   id?: true
   gameType?: true
   date?: true
   puzzleId?: true
+  serialNumber?: true
   createdAt?: true
 }
 
@@ -63,6 +85,7 @@ export type DailyPuzzleMaxAggregateInputType = {
   gameType?: true
   date?: true
   puzzleId?: true
+  serialNumber?: true
   createdAt?: true
 }
 
@@ -71,6 +94,7 @@ export type DailyPuzzleCountAggregateInputType = {
   gameType?: true
   date?: true
   puzzleId?: true
+  serialNumber?: true
   createdAt?: true
   _all?: true
 }
@@ -113,6 +137,18 @@ export type DailyPuzzleAggregateArgs<ExtArgs extends runtime.Types.Extensions.In
   /**
    * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
    * 
+   * Select which fields to average
+  **/
+  _avg?: DailyPuzzleAvgAggregateInputType
+  /**
+   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+   * 
+   * Select which fields to sum
+  **/
+  _sum?: DailyPuzzleSumAggregateInputType
+  /**
+   * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+   * 
    * Select which fields to find the minimum value
   **/
   _min?: DailyPuzzleMinAggregateInputType
@@ -143,6 +179,8 @@ export type DailyPuzzleGroupByArgs<ExtArgs extends runtime.Types.Extensions.Inte
   take?: number
   skip?: number
   _count?: DailyPuzzleCountAggregateInputType | true
+  _avg?: DailyPuzzleAvgAggregateInputType
+  _sum?: DailyPuzzleSumAggregateInputType
   _min?: DailyPuzzleMinAggregateInputType
   _max?: DailyPuzzleMaxAggregateInputType
 }
@@ -152,8 +190,11 @@ export type DailyPuzzleGroupByOutputType = {
   gameType: $Enums.GameType
   date: string
   puzzleId: string
+  serialNumber: number
   createdAt: Date
   _count: DailyPuzzleCountAggregateOutputType | null
+  _avg: DailyPuzzleAvgAggregateOutputType | null
+  _sum: DailyPuzzleSumAggregateOutputType | null
   _min: DailyPuzzleMinAggregateOutputType | null
   _max: DailyPuzzleMaxAggregateOutputType | null
 }
@@ -181,6 +222,7 @@ export type DailyPuzzleWhereInput = {
   gameType?: Prisma.EnumGameTypeFilter<"DailyPuzzle"> | $Enums.GameType
   date?: Prisma.StringFilter<"DailyPuzzle"> | string
   puzzleId?: Prisma.StringFilter<"DailyPuzzle"> | string
+  serialNumber?: Prisma.IntFilter<"DailyPuzzle"> | number
   createdAt?: Prisma.DateTimeFilter<"DailyPuzzle"> | Date | string
   puzzle?: Prisma.XOR<Prisma.GamePuzzleScalarRelationFilter, Prisma.GamePuzzleWhereInput>
   completions?: Prisma.GameCompletionListRelationFilter
@@ -191,6 +233,7 @@ export type DailyPuzzleOrderByWithRelationInput = {
   gameType?: Prisma.SortOrder
   date?: Prisma.SortOrder
   puzzleId?: Prisma.SortOrder
+  serialNumber?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   puzzle?: Prisma.GamePuzzleOrderByWithRelationInput
   completions?: Prisma.GameCompletionOrderByRelationAggregateInput
@@ -205,6 +248,7 @@ export type DailyPuzzleWhereUniqueInput = Prisma.AtLeast<{
   gameType?: Prisma.EnumGameTypeFilter<"DailyPuzzle"> | $Enums.GameType
   date?: Prisma.StringFilter<"DailyPuzzle"> | string
   puzzleId?: Prisma.StringFilter<"DailyPuzzle"> | string
+  serialNumber?: Prisma.IntFilter<"DailyPuzzle"> | number
   createdAt?: Prisma.DateTimeFilter<"DailyPuzzle"> | Date | string
   puzzle?: Prisma.XOR<Prisma.GamePuzzleScalarRelationFilter, Prisma.GamePuzzleWhereInput>
   completions?: Prisma.GameCompletionListRelationFilter
@@ -215,10 +259,13 @@ export type DailyPuzzleOrderByWithAggregationInput = {
   gameType?: Prisma.SortOrder
   date?: Prisma.SortOrder
   puzzleId?: Prisma.SortOrder
+  serialNumber?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   _count?: Prisma.DailyPuzzleCountOrderByAggregateInput
+  _avg?: Prisma.DailyPuzzleAvgOrderByAggregateInput
   _max?: Prisma.DailyPuzzleMaxOrderByAggregateInput
   _min?: Prisma.DailyPuzzleMinOrderByAggregateInput
+  _sum?: Prisma.DailyPuzzleSumOrderByAggregateInput
 }
 
 export type DailyPuzzleScalarWhereWithAggregatesInput = {
@@ -229,6 +276,7 @@ export type DailyPuzzleScalarWhereWithAggregatesInput = {
   gameType?: Prisma.EnumGameTypeWithAggregatesFilter<"DailyPuzzle"> | $Enums.GameType
   date?: Prisma.StringWithAggregatesFilter<"DailyPuzzle"> | string
   puzzleId?: Prisma.StringWithAggregatesFilter<"DailyPuzzle"> | string
+  serialNumber?: Prisma.IntWithAggregatesFilter<"DailyPuzzle"> | number
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"DailyPuzzle"> | Date | string
 }
 
@@ -236,6 +284,7 @@ export type DailyPuzzleCreateInput = {
   id?: string
   gameType: $Enums.GameType
   date: string
+  serialNumber?: number
   createdAt?: Date | string
   puzzle: Prisma.GamePuzzleCreateNestedOneWithoutDailyPuzzlesInput
   completions?: Prisma.GameCompletionCreateNestedManyWithoutDailyPuzzleInput
@@ -246,6 +295,7 @@ export type DailyPuzzleUncheckedCreateInput = {
   gameType: $Enums.GameType
   date: string
   puzzleId: string
+  serialNumber?: number
   createdAt?: Date | string
   completions?: Prisma.GameCompletionUncheckedCreateNestedManyWithoutDailyPuzzleInput
 }
@@ -254,6 +304,7 @@ export type DailyPuzzleUpdateInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   puzzle?: Prisma.GamePuzzleUpdateOneRequiredWithoutDailyPuzzlesNestedInput
   completions?: Prisma.GameCompletionUpdateManyWithoutDailyPuzzleNestedInput
@@ -264,6 +315,7 @@ export type DailyPuzzleUncheckedUpdateInput = {
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
   puzzleId?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   completions?: Prisma.GameCompletionUncheckedUpdateManyWithoutDailyPuzzleNestedInput
 }
@@ -273,6 +325,7 @@ export type DailyPuzzleCreateManyInput = {
   gameType: $Enums.GameType
   date: string
   puzzleId: string
+  serialNumber?: number
   createdAt?: Date | string
 }
 
@@ -280,6 +333,7 @@ export type DailyPuzzleUpdateManyMutationInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -288,6 +342,7 @@ export type DailyPuzzleUncheckedUpdateManyInput = {
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
   puzzleId?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -311,7 +366,12 @@ export type DailyPuzzleCountOrderByAggregateInput = {
   gameType?: Prisma.SortOrder
   date?: Prisma.SortOrder
   puzzleId?: Prisma.SortOrder
+  serialNumber?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
+}
+
+export type DailyPuzzleAvgOrderByAggregateInput = {
+  serialNumber?: Prisma.SortOrder
 }
 
 export type DailyPuzzleMaxOrderByAggregateInput = {
@@ -319,6 +379,7 @@ export type DailyPuzzleMaxOrderByAggregateInput = {
   gameType?: Prisma.SortOrder
   date?: Prisma.SortOrder
   puzzleId?: Prisma.SortOrder
+  serialNumber?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
@@ -327,7 +388,12 @@ export type DailyPuzzleMinOrderByAggregateInput = {
   gameType?: Prisma.SortOrder
   date?: Prisma.SortOrder
   puzzleId?: Prisma.SortOrder
+  serialNumber?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
+}
+
+export type DailyPuzzleSumOrderByAggregateInput = {
+  serialNumber?: Prisma.SortOrder
 }
 
 export type DailyPuzzleNullableScalarRelationFilter = {
@@ -397,6 +463,7 @@ export type DailyPuzzleCreateWithoutPuzzleInput = {
   id?: string
   gameType: $Enums.GameType
   date: string
+  serialNumber?: number
   createdAt?: Date | string
   completions?: Prisma.GameCompletionCreateNestedManyWithoutDailyPuzzleInput
 }
@@ -405,6 +472,7 @@ export type DailyPuzzleUncheckedCreateWithoutPuzzleInput = {
   id?: string
   gameType: $Enums.GameType
   date: string
+  serialNumber?: number
   createdAt?: Date | string
   completions?: Prisma.GameCompletionUncheckedCreateNestedManyWithoutDailyPuzzleInput
 }
@@ -443,6 +511,7 @@ export type DailyPuzzleScalarWhereInput = {
   gameType?: Prisma.EnumGameTypeFilter<"DailyPuzzle"> | $Enums.GameType
   date?: Prisma.StringFilter<"DailyPuzzle"> | string
   puzzleId?: Prisma.StringFilter<"DailyPuzzle"> | string
+  serialNumber?: Prisma.IntFilter<"DailyPuzzle"> | number
   createdAt?: Prisma.DateTimeFilter<"DailyPuzzle"> | Date | string
 }
 
@@ -450,6 +519,7 @@ export type DailyPuzzleCreateWithoutCompletionsInput = {
   id?: string
   gameType: $Enums.GameType
   date: string
+  serialNumber?: number
   createdAt?: Date | string
   puzzle: Prisma.GamePuzzleCreateNestedOneWithoutDailyPuzzlesInput
 }
@@ -459,6 +529,7 @@ export type DailyPuzzleUncheckedCreateWithoutCompletionsInput = {
   gameType: $Enums.GameType
   date: string
   puzzleId: string
+  serialNumber?: number
   createdAt?: Date | string
 }
 
@@ -482,6 +553,7 @@ export type DailyPuzzleUpdateWithoutCompletionsInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   puzzle?: Prisma.GamePuzzleUpdateOneRequiredWithoutDailyPuzzlesNestedInput
 }
@@ -491,6 +563,7 @@ export type DailyPuzzleUncheckedUpdateWithoutCompletionsInput = {
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
   puzzleId?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -498,6 +571,7 @@ export type DailyPuzzleCreateManyPuzzleInput = {
   id?: string
   gameType: $Enums.GameType
   date: string
+  serialNumber?: number
   createdAt?: Date | string
 }
 
@@ -505,6 +579,7 @@ export type DailyPuzzleUpdateWithoutPuzzleInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   completions?: Prisma.GameCompletionUpdateManyWithoutDailyPuzzleNestedInput
 }
@@ -513,6 +588,7 @@ export type DailyPuzzleUncheckedUpdateWithoutPuzzleInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   completions?: Prisma.GameCompletionUncheckedUpdateManyWithoutDailyPuzzleNestedInput
 }
@@ -521,6 +597,7 @@ export type DailyPuzzleUncheckedUpdateManyWithoutPuzzleInput = {
   id?: Prisma.StringFieldUpdateOperationsInput | string
   gameType?: Prisma.EnumGameTypeFieldUpdateOperationsInput | $Enums.GameType
   date?: Prisma.StringFieldUpdateOperationsInput | string
+  serialNumber?: Prisma.IntFieldUpdateOperationsInput | number
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -560,6 +637,7 @@ export type DailyPuzzleSelect<ExtArgs extends runtime.Types.Extensions.InternalA
   gameType?: boolean
   date?: boolean
   puzzleId?: boolean
+  serialNumber?: boolean
   createdAt?: boolean
   puzzle?: boolean | Prisma.GamePuzzleDefaultArgs<ExtArgs>
   completions?: boolean | Prisma.DailyPuzzle$completionsArgs<ExtArgs>
@@ -571,6 +649,7 @@ export type DailyPuzzleSelectCreateManyAndReturn<ExtArgs extends runtime.Types.E
   gameType?: boolean
   date?: boolean
   puzzleId?: boolean
+  serialNumber?: boolean
   createdAt?: boolean
   puzzle?: boolean | Prisma.GamePuzzleDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["dailyPuzzle"]>
@@ -580,6 +659,7 @@ export type DailyPuzzleSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.E
   gameType?: boolean
   date?: boolean
   puzzleId?: boolean
+  serialNumber?: boolean
   createdAt?: boolean
   puzzle?: boolean | Prisma.GamePuzzleDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["dailyPuzzle"]>
@@ -589,10 +669,11 @@ export type DailyPuzzleSelectScalar = {
   gameType?: boolean
   date?: boolean
   puzzleId?: boolean
+  serialNumber?: boolean
   createdAt?: boolean
 }
 
-export type DailyPuzzleOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "gameType" | "date" | "puzzleId" | "createdAt", ExtArgs["result"]["dailyPuzzle"]>
+export type DailyPuzzleOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"id" | "gameType" | "date" | "puzzleId" | "serialNumber" | "createdAt", ExtArgs["result"]["dailyPuzzle"]>
 export type DailyPuzzleInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   puzzle?: boolean | Prisma.GamePuzzleDefaultArgs<ExtArgs>
   completions?: boolean | Prisma.DailyPuzzle$completionsArgs<ExtArgs>
@@ -616,6 +697,7 @@ export type $DailyPuzzlePayload<ExtArgs extends runtime.Types.Extensions.Interna
     gameType: $Enums.GameType
     date: string
     puzzleId: string
+    serialNumber: number
     createdAt: Date
   }, ExtArgs["result"]["dailyPuzzle"]>
   composites: {}
@@ -1046,6 +1128,7 @@ export interface DailyPuzzleFieldRefs {
   readonly gameType: Prisma.FieldRef<"DailyPuzzle", 'GameType'>
   readonly date: Prisma.FieldRef<"DailyPuzzle", 'String'>
   readonly puzzleId: Prisma.FieldRef<"DailyPuzzle", 'String'>
+  readonly serialNumber: Prisma.FieldRef<"DailyPuzzle", 'Int'>
   readonly createdAt: Prisma.FieldRef<"DailyPuzzle", 'DateTime'>
 }
     

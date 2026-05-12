@@ -40,7 +40,7 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
   const { lightImpact, successNotification } = useHaptics();
   const { showInterstitialIfDue, showRewardedAd } = useAdMob();
   const queryClient = useQueryClient();
-  const { saveProgress, loadProgress, clearProgress, markCompleted } = usePuzzleProgressStore();
+  const { saveProgress, loadProgress, clearProgress, markCompleted, saveDailyResult } = usePuzzleProgressStore();
   const { enqueue } = useOfflineQueueStore();
   const t = useAppTheme();
   const { width } = useWindowDimensions();
@@ -78,7 +78,7 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
   function buildInitial(): NGState { return { board: Array.from({ length: size }, () => Array(size).fill('empty')) }; }
 
   useEffect(() => {
-    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); setShowResume(true); } else startFresh(); }
+    async function init() { const s = await loadProgress(puzzleId); if (s) { setSavedData(s); if (isDaily) { continueFromSave(); } else { setShowResume(true); } } else startFresh(); }
     init();
   }, [puzzleId]);
 
@@ -132,6 +132,7 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
     const elapsed = useGameSessionStore.getState().getElapsed(), hints = useGameSessionStore.getState().session?.hintsUsed ?? 0;
     const shareable = generateShareableResult({ gameType: GameType.NONOGRAM, difficulty: currentSession.difficulty, elapsedSeconds: elapsed, hintsUsed: hints, date: new Date().toISOString().slice(0, 10), isDaily });
     submit({ elapsedSeconds: elapsed, hintsUsed: hints, shareableResult: shareable });
+      if (isDaily && dailyPuzzleId) saveDailyResult(dailyPuzzleId, shareable);
     await markCompleted(puzzleId, isDaily); await puzzleCache.markCompleted(puzzleId, GameType.NONOGRAM); await showInterstitialIfDue();
   }
 
@@ -171,20 +172,44 @@ export default function NonogramGame({ puzzleId, puzzleData, isDaily, dailyPuzzl
       const r = Math.floor((pageY - boardOriginRef.current.y) / CELL);
       const c = Math.floor((pageX - boardOriginRef.current.x - CLUE) / CELL);
       if (r < 0 || r >= size || c < 0 || c >= size) return;
+      const mode = dragModeRef.current; if (!mode) return;
+
+      const cellsToProcess: Array<[number, number]> = [];
+      const lastKey = lastDragCellRef.current;
+      if (lastKey) {
+        const [lr, lc] = lastKey.split(',').map(Number);
+        let cr = lr, cc = lc;
+        const dr = Math.sign(r - lr), dc = Math.sign(c - lc);
+        while (cr !== r || cc !== c) {
+          if (cr !== r) cr += dr;
+          if (cc !== c) cc += dc;
+          cellsToProcess.push([cr, cc]);
+        }
+      } else {
+        cellsToProcess.push([r, c]);
+      }
+
       const key = `${r},${c}`; if (lastDragCellRef.current === key) return;
       lastDragCellRef.current = key;
-      const mode = dragModeRef.current; if (!mode) return;
-      const cur = dragBoardRef.current[r][c];
-      if ((mode === 'fill' && cur === 'empty') || (mode === 'mark' && cur === 'empty')) {
-        dragBoardRef.current[r][c] = mode === 'fill' ? 'filled' : 'marked';
-        useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
+
+      let changed = false;
+      for (const [pr, pc] of cellsToProcess) {
+        if (pr < 0 || pr >= size || pc < 0 || pc >= size) continue;
+        const cur = dragBoardRef.current[pr][pc];
+        if ((mode === 'fill' && cur === 'empty') || (mode === 'mark' && cur === 'empty')) {
+          dragBoardRef.current[pr][pc] = mode === 'fill' ? 'filled' : 'marked';
+          changed = true;
+        }
       }
+      if (changed) useGameSessionStore.getState().updateState({ board: dragBoardRef.current.map(row => [...row]) }, false);
     },
     onPanResponderRelease: () => {
       const finalBoard = dragBoardRef.current;
       dragBoardRef.current = null; dragModeRef.current = null; lastDragCellRef.current = null;
       if (!finalBoard) return;
       useGameSessionStore.getState().updateState({ board: finalBoard }, true);
+      const filledCount = finalBoard.flat().filter(c => c !== 'empty').length;
+      if (filledCount < size * size * 0.8) return;
       if (checkSolved(finalBoard)) {
         const s = useGameSessionStore.getState().session;
         if (s && !s.isSolved) triggerWin(finalBoard, s);

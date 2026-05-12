@@ -78,10 +78,16 @@ function generateSolution(size: number, constraints: TangoConstraints, rng: () =
   return backtrack(0) ? grid : null;
 }
 
-function generateConstraints(size: number, solution: TangoSymbol[][], rng: () => number): TangoConstraints {
+function generateConstraints(size: number, solution: TangoSymbol[][], rng: () => number, difficulty: Difficulty): TangoConstraints {
   const horizontal: Record<string, TangoConstraint> = {};
   const vertical: Record<string, TangoConstraint> = {};
-  const chance = 0.3;
+  const chanceByDifficulty: Record<Difficulty, number> = {
+    [Difficulty.EASY]: 0.30,
+    [Difficulty.MEDIUM]: 0.25,
+    [Difficulty.HARD]: 0.15,
+    [Difficulty.EXPERT]: 0.10,
+  };
+  const chance = chanceByDifficulty[difficulty];
   for (let r = 0; r < size; r++) for (let c = 0; c < size-1; c++) { if (rng() < chance) horizontal[`${r},${c}`] = solution[r][c] === solution[r][c+1] ? '=' : 'x'; }
   for (let r = 0; r < size-1; r++) for (let c = 0; c < size; c++) { if (rng() < chance) vertical[`${r},${c}`] = solution[r][c] === solution[r+1][c] ? '=' : 'x'; }
   return { horizontal, vertical };
@@ -127,10 +133,10 @@ export function generatePuzzle(difficulty: Difficulty, seed?: number): TangoGene
     const rng = createRng(actualSeed);
     const size = TANGO_SIZE_CONFIG[difficulty];
     const emptyGrid: TangoSymbol[][] = Array.from({ length: size }, () => Array(size).fill('empty'));
-    const constraints = generateConstraints(size, emptyGrid, rng);
+    const constraints = generateConstraints(size, emptyGrid, rng, difficulty);
     const solution = generateSolution(size, constraints, rng);
     if (!solution) continue;
-    const realConstraints = generateConstraints(size, solution, rng);
+    const realConstraints = generateConstraints(size, solution, rng, difficulty);
     const verifiedSolution = generateSolution(size, realConstraints, rng);
     if (!verifiedSolution) continue;
     const revealCount = Math.max(size, Math.floor(size * size * revealRate[difficulty]));

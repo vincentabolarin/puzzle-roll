@@ -58,18 +58,23 @@ export class AdminController {
   async reassignDailyPuzzle(
     @Body() body: { gameType: GameType; date: string; puzzleId: string }
   ) {
+    const existing = await this.prisma.dailyPuzzle.findUnique({
+      where: { gameType_date: { gameType: body.gameType, date: body.date } },
+      select: { serialNumber: true },
+    });
+
+    let serialNumber = existing?.serialNumber;
+    if (serialNumber === undefined) {
+      const max = await this.prisma.dailyPuzzle.aggregate({
+        where: { gameType: body.gameType },
+        _max: { serialNumber: true },
+      });
+      serialNumber = (max._max.serialNumber ?? 0) + 1;
+    }
+
     const updated = await this.prisma.dailyPuzzle.upsert({
-      where: {
-        gameType_date: {
-          gameType: body.gameType,
-          date: body.date,
-        },
-      },
-      create: {
-        gameType: body.gameType,
-        date: body.date,
-        puzzleId: body.puzzleId,
-      },
+      where: { gameType_date: { gameType: body.gameType, date: body.date } },
+      create: { gameType: body.gameType, date: body.date, puzzleId: body.puzzleId, serialNumber },
       update: { puzzleId: body.puzzleId },
     });
 
